@@ -1,4 +1,4 @@
-//! Assembly test framework for the fezinator analyzer
+//! Assembly test framework for the snippex analyzer
 //!
 //! This module provides a test framework for validating the analyzer's output
 //! using manually written annotated assembly files.
@@ -48,8 +48,8 @@ use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
 
-use fezinator::analyzer::Analyzer;
-use fezinator::extractor::Extractor;
+use snippex::analyzer::Analyzer;
+use snippex::extractor::Extractor;
 
 #[derive(Debug, Clone)]
 struct AsmTest {

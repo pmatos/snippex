@@ -14,7 +14,7 @@ Thumbs.db
 
 # Project specific
 *.db
-fezinator.db
+snippex.db
 
 # FEX test extraction tracking
 /tests/asm/.fex_extracted.json

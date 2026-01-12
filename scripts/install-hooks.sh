@@ -1,13 +1,13 @@
 #!/bin/bash
 set -e
 
-# Script to install git hooks for Fezinator
+# Script to install git hooks for Snippex
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 HOOKS_DIR="$PROJECT_DIR/.git/hooks"
 
-echo "Installing git hooks for Fezinator..."
+echo "Installing git hooks for Snippex..."
 
 # Ensure hooks directory exists
 mkdir -p "$HOOKS_DIR"

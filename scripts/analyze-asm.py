@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Fezinator Assembly Analyzer
+Snippex Assembly Analyzer
 
 A utility script that takes an assembly file, assembles it with NASM,
-and analyzes it using fezinator without leaving database traces.
+and analyzes it using snippex without leaving database traces.
 
 Usage:
     python3 scripts/analyze-asm.py --32 example.asm
@@ -35,13 +35,13 @@ def check_dependencies():
     return True
 
 
-def find_fezinator():
-    """Find the fezinator binary."""
+def find_snippex():
+    """Find the snippex binary."""
     # Try release build first, then debug build
     script_dir = Path(__file__).parent.parent
     candidates = [
-        script_dir / "target" / "release" / "fezinator",
-        script_dir / "target" / "debug" / "fezinator",
+        script_dir / "target" / "release" / "snippex",
+        script_dir / "target" / "debug" / "snippex",
     ]
     
     for candidate in candidates:
@@ -49,11 +49,11 @@ def find_fezinator():
             return candidate
     
     # Try system PATH
-    if subprocess.run(['which', 'fezinator'], capture_output=True).returncode == 0:
-        return 'fezinator'
+    if subprocess.run(['which', 'snippex'], capture_output=True).returncode == 0:
+        return 'snippex'
     
-    print("Error: fezinator binary not found.", file=sys.stderr)
-    print("Please build fezinator first: cargo build --release", file=sys.stderr)
+    print("Error: snippex binary not found.", file=sys.stderr)
+    print("Please build snippex first: cargo build --release", file=sys.stderr)
     return None
 
 
@@ -180,10 +180,10 @@ def find_user_code_range(elf_file, bits):
     return start_addr, end_addr
 
 
-def extract_with_fezinator(fezinator_path, elf_file, db_file, start_addr, end_addr):
-    """Extract the assembly block using fezinator with specific range."""
+def extract_with_snippex(snippex_path, elf_file, db_file, start_addr, end_addr):
+    """Extract the assembly block using snippex with specific range."""
     extract_cmd = [
-        str(fezinator_path), "extract", 
+        str(snippex_path), "extract", 
         "--database", str(db_file),
         "--range", f"0x{start_addr:x}", f"0x{end_addr:x}",
         str(elf_file)
@@ -191,17 +191,17 @@ def extract_with_fezinator(fezinator_path, elf_file, db_file, start_addr, end_ad
     
     result = subprocess.run(extract_cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        print(f"Fezinator extraction failed:", file=sys.stderr)
+        print(f"Snippex extraction failed:", file=sys.stderr)
         print(result.stderr, file=sys.stderr)
         return False
     
     return True
 
 
-def analyze_with_fezinator(fezinator_path, db_file):
-    """Analyze the extracted block using fezinator."""
+def analyze_with_snippex(snippex_path, db_file):
+    """Analyze the extracted block using snippex."""
     # First check if there are any blocks
-    list_cmd = [str(fezinator_path), "list", "--database", str(db_file)]
+    list_cmd = [str(snippex_path), "list", "--database", str(db_file)]
     result = subprocess.run(list_cmd, capture_output=True, text=True)
     if result.returncode != 0 or not result.stdout.strip():
         print("No blocks found to analyze", file=sys.stderr)
@@ -209,14 +209,14 @@ def analyze_with_fezinator(fezinator_path, db_file):
     
     # Analyze block #1
     analyze_cmd = [
-        str(fezinator_path), "analyze", "1",
+        str(snippex_path), "analyze", "1",
         "--database", str(db_file),
         "--verbose"
     ]
     
     result = subprocess.run(analyze_cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        print(f"Fezinator analysis failed:", file=sys.stderr)
+        print(f"Snippex analysis failed:", file=sys.stderr)
         print(result.stderr, file=sys.stderr)
         return False
     
@@ -227,7 +227,7 @@ def analyze_with_fezinator(fezinator_path, db_file):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Assemble and analyze assembly code with fezinator",
+        description="Assemble and analyze assembly code with snippex",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -258,17 +258,17 @@ Examples:
     if not check_dependencies():
         return 1
     
-    # Find fezinator binary
-    fezinator_path = find_fezinator()
-    if not fezinator_path:
+    # Find snippex binary
+    snippex_path = find_snippex()
+    if not snippex_path:
         return 1
     
     if args.verbose:
-        print(f"Using fezinator: {fezinator_path}")
+        print(f"Using snippex: {snippex_path}")
         print(f"Assembling {asm_file} for {bits}-bit architecture")
     
     # Create temporary directory for all operations
-    with tempfile.TemporaryDirectory(prefix="fezinator_analyze_") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="snippex_analyze_") as temp_dir:
         temp_path = Path(temp_dir)
         
         try:
@@ -298,18 +298,18 @@ Examples:
             # Create temporary database
             db_file = temp_path / "temp.db"
             
-            # Extract with fezinator using specific range
+            # Extract with snippex using specific range
             if args.verbose:
                 print("Extracting user code block...")
-            if not extract_with_fezinator(fezinator_path, elf_file, db_file, start_addr, end_addr):
+            if not extract_with_snippex(snippex_path, elf_file, db_file, start_addr, end_addr):
                 return 1
             
-            # Analyze with fezinator
+            # Analyze with snippex
             if args.verbose:
                 print("Analyzing block...")
                 print("=" * 60)
             
-            if not analyze_with_fezinator(fezinator_path, db_file):
+            if not analyze_with_snippex(snippex_path, db_file):
                 return 1
             
         except Exception as e:

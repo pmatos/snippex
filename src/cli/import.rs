@@ -7,7 +7,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::db::{BinaryInfo, Database};
-use crate::error::FezinatorError;
+use crate::error::SnippexError;
 use crate::simulator::compilation::CompilationPipeline;
 
 #[derive(Args)]
@@ -31,7 +31,7 @@ pub struct ImportCommand {
     #[arg(
         short,
         long,
-        default_value = "fezinator.db",
+        default_value = "snippex.db",
         help = "SQLite database path"
     )]
     database: PathBuf,
@@ -49,7 +49,7 @@ impl ImportCommand {
 
         // Validate input file
         if !self.nasm_file.exists() {
-            return Err(FezinatorError::InvalidBinary(format!(
+            return Err(SnippexError::InvalidBinary(format!(
                 "NASM file not found: {}",
                 self.nasm_file.display()
             ))
@@ -57,7 +57,7 @@ impl ImportCommand {
         }
 
         let nasm_content = fs::read_to_string(&self.nasm_file).map_err(|e| {
-            FezinatorError::InvalidBinary(format!(
+            SnippexError::InvalidBinary(format!(
                 "Failed to read NASM file {}: {}",
                 self.nasm_file.display(),
                 e
@@ -65,7 +65,7 @@ impl ImportCommand {
         })?;
 
         if nasm_content.trim().is_empty() {
-            return Err(FezinatorError::InvalidBinary("NASM file is empty".into()).into());
+            return Err(SnippexError::InvalidBinary("NASM file is empty".into()).into());
         }
 
         // Detect architecture
@@ -105,14 +105,14 @@ impl ImportCommand {
 
         // Read the compiled binary to extract machine code
         let binary_data = fs::read(&binary_file).map_err(|e| {
-            FezinatorError::BinaryParsing(format!("Failed to read compiled binary: {}", e))
+            SnippexError::BinaryParsing(format!("Failed to read compiled binary: {}", e))
         })?;
 
         // Extract the .text section (machine code) from the ELF
         let assembly_block = self.extract_text_section(&binary_data)?;
 
         if assembly_block.is_empty() {
-            return Err(FezinatorError::InvalidBinary(
+            return Err(SnippexError::InvalidBinary(
                 "No executable code found in compiled binary".into(),
             )
             .into());
@@ -122,9 +122,7 @@ impl ImportCommand {
         let base_addr = match architecture.as_str() {
             "x86_64" => 0x400000,
             "i386" => 0x8048000,
-            _ => {
-                return Err(FezinatorError::InvalidBinary("Unsupported architecture".into()).into())
-            }
+            _ => return Err(SnippexError::InvalidBinary("Unsupported architecture".into()).into()),
         };
 
         let start_addr = base_addr;
@@ -186,7 +184,7 @@ impl ImportCommand {
                 "x86" | "i386" | "32" => return Ok("i386".to_string()),
                 "x86_64" | "amd64" | "64" => return Ok("x86_64".to_string()),
                 _ => {
-                    return Err(FezinatorError::InvalidBinary(format!(
+                    return Err(SnippexError::InvalidBinary(format!(
                         "Unsupported architecture: {}. Use 'x86' or 'x86_64'",
                         arch
                     ))
@@ -221,9 +219,7 @@ impl ImportCommand {
         let bits = match architecture {
             "x86_64" => "64",
             "i386" => "32",
-            _ => {
-                return Err(FezinatorError::InvalidBinary("Unsupported architecture".into()).into())
-            }
+            _ => return Err(SnippexError::InvalidBinary("Unsupported architecture".into()).into()),
         };
 
         let mut formatted = String::new();
@@ -288,16 +284,16 @@ impl ImportCommand {
     fn extract_text_section(&self, binary_data: &[u8]) -> Result<Vec<u8>> {
         // Parse the ELF binary using the object crate
         let file = object::File::parse(binary_data).map_err(|e| {
-            FezinatorError::BinaryParsing(format!("Failed to parse compiled binary: {}", e))
+            SnippexError::BinaryParsing(format!("Failed to parse compiled binary: {}", e))
         })?;
 
         // Find the .text section
         let text_section = file.section_by_name(".text").ok_or_else(|| {
-            FezinatorError::BinaryParsing("No .text section found in compiled binary".into())
+            SnippexError::BinaryParsing("No .text section found in compiled binary".into())
         })?;
 
         let section_data = text_section.data().map_err(|e| {
-            FezinatorError::BinaryParsing(format!("Failed to read .text section: {}", e))
+            SnippexError::BinaryParsing(format!("Failed to read .text section: {}", e))
         })?;
 
         // Remove the exit syscall we added (last few bytes)

@@ -1,8 +1,8 @@
 use std::fs;
 use tempfile::NamedTempFile;
 
-use fezinator::analyzer::Analyzer;
-use fezinator::db::{BinaryInfo, Database};
+use snippex::analyzer::Analyzer;
+use snippex::db::{BinaryInfo, Database};
 
 fn create_test_binary() -> Vec<u8> {
     // Create a minimal ELF binary with some x86_64 instructions

@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum FezinatorError {
+pub enum SnippexError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -18,5 +18,5 @@ pub enum FezinatorError {
     Simulation(String),
 }
 
-pub type Error = FezinatorError;
+pub type Error = SnippexError;
 pub type Result<T> = std::result::Result<T, Error>;

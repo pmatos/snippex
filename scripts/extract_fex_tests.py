@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-FEX Test Extractor for Fezinator
+FEX Test Extractor for Snippex
 
 Extracts NASM assembly tests from FEX-Emu repository, removes JSON headers,
-and converts them to Fezinator's test format. Tracks extracted tests by SHA256
+and converts them to Snippex's test format. Tracks extracted tests by SHA256
 to avoid duplicates across runs.
 """
 
@@ -174,7 +174,7 @@ class FEXTestExtractor:
             output_filename = self.generate_output_filename(fex_file, asm_dir)
             output_path = self.output_dir / output_filename
 
-            # Generate Fezinator-style header
+            # Generate Snippex-style header
             header = f"; BITS: {bits}\n"
             header += f"; SOURCE: FEX {rel_path}\n"
             header += f"; FEX_SHA256: {file_sha}\n"
@@ -248,7 +248,7 @@ class FEXTestExtractor:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Extract FEX tests into Fezinator format"
+        description="Extract FEX tests into Snippex format"
     )
     parser.add_argument(
         "--fex-path",

@@ -20,7 +20,7 @@ pub struct ExtractCommand {
     #[arg(
         short,
         long,
-        default_value = "fezinator.db",
+        default_value = "snippex.db",
         help = "SQLite database path"
     )]
     database: PathBuf,

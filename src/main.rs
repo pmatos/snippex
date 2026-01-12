@@ -20,7 +20,7 @@ use cli::remove::RemoveCommand;
 use cli::simulate::SimulateCommand;
 
 #[derive(Parser)]
-#[command(name = "fezinator")]
+#[command(name = "snippex")]
 #[command(about = "A framework for extracting and analyzing assembly code blocks from ELF and PE binaries", long_about = None)]
 struct Cli {
     #[command(subcommand)]

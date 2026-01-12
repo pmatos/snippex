@@ -3,12 +3,12 @@
   "permissions": {
     "allow": [
       "Bash(./scripts/qa.sh:*)",
-      "Bash(./target/debug/fezinator:*)",
+      "Bash(./target/debug/snippex:*)",
       "Bash(./target/debug/test-asm:*)",
-      "Bash(./target/release/fezinator analyze:*)",
-      "Bash(./target/release/fezinator list)",
-      "Bash(./target/release/fezinator remove:*)",
-      "Bash(./target/release/fezinator extract:*)",
+      "Bash(./target/release/snippex analyze:*)",
+      "Bash(./target/release/snippex list)",
+      "Bash(./target/release/snippex remove:*)",
+      "Bash(./target/release/snippex extract:*)",
       "Bash(cargo:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",

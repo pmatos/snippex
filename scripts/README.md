@@ -1,10 +1,10 @@
-# Fezinator Scripts
+# Snippex Scripts
 
-This directory contains auxiliary scripts for working with fezinator.
+This directory contains auxiliary scripts for working with snippex.
 
 ## analyze-asm.py
 
-A Python utility that assembles an assembly file and analyzes it with fezinator without leaving database traces.
+A Python utility that assembles an assembly file and analyzes it with snippex without leaving database traces.
 
 ### Usage
 
@@ -32,7 +32,7 @@ python3 scripts/analyze-asm.py --64 example.asm --verbose
 - Python 3.6+
 - NASM assembler (`sudo apt install nasm`)
 - ld linker (usually pre-installed)
-- fezinator binary (built with `cargo build --release`)
+- snippex binary (built with `cargo build --release`)
 
 ### Examples
 
@@ -47,7 +47,7 @@ mov rbx, rax
 ```bash
 $ python3 scripts/analyze-asm.py --64 example.asm
 Analyzing block #1...
-  Binary: /tmp/fezinator_analyze_xyz/input
+  Binary: /tmp/snippex_analyze_xyz/input
   Address range: 0x00401000 - 0x00401016
 
 Analysis Results:
@@ -87,15 +87,15 @@ This will show memory access analysis including load and store operations.
 1. **Preprocessing**: Adds NASM preamble with proper section headers and exit syscalls
 2. **Assembly**: Uses NASM to create object file with correct architecture
 3. **Linking**: Links object file into ELF executable with proper architecture flags
-4. **Extraction**: Uses fezinator to extract the entire code section as a block
+4. **Extraction**: Uses snippex to extract the entire code section as a block
 5. **Analysis**: Analyzes the block and displays results
 6. **Cleanup**: Automatically removes all temporary files and databases
 
-The script operates entirely in temporary directories and uses temporary database files, ensuring no interference with your main fezinator database.
+The script operates entirely in temporary directories and uses temporary database files, ensuring no interference with your main snippex database.
 
 ## extract_fex_tests.py
 
-A Python utility that extracts NASM assembly tests from the FEX-Emu project and converts them to Fezinator's test format. It removes JSON headers from FEX tests and tracks extracted tests by SHA256 hash to avoid duplicates.
+A Python utility that extracts NASM assembly tests from the FEX-Emu project and converts them to Snippex's test format. It removes JSON headers from FEX tests and tracks extracted tests by SHA256 hash to avoid duplicates.
 
 ### Usage
 
@@ -119,7 +119,7 @@ A Python utility that extracts NASM assembly tests from the FEX-Emu project and 
 
 ### Features
 
-- **Automatic Conversion**: Removes FEX JSON headers and converts to Fezinator format
+- **Automatic Conversion**: Removes FEX JSON headers and converts to Snippex format
 - **Deduplication**: Tracks extracted tests by SHA256 hash to avoid duplicates
 - **Architecture Detection**: Auto-detects 32/64-bit from JSON metadata or assembly code
 - **Category Filtering**: Extract only specific test categories (e.g., TwoByte, X87)
@@ -148,7 +148,7 @@ mov rax, -1
 hlt
 ```
 
-### Fezinator Output Format
+### Snippex Output Format
 
 Extracted tests have simplified metadata comments:
 
@@ -197,12 +197,12 @@ The script automatically skips already-extracted tests based on their SHA256 has
 
 ## annotate_asm_tests.py
 
-A Python utility that automatically analyzes assembly test files and adds LIVEIN, LIVEOUT, EXITS, and MEMORY annotations using Fezinator's analyzer. This is useful for preparing FEX tests (or any assembly tests) for Fezinator's test framework.
+A Python utility that automatically analyzes assembly test files and adds LIVEIN, LIVEOUT, EXITS, and MEMORY annotations using Snippex's analyzer. This is useful for preparing FEX tests (or any assembly tests) for Snippex's test framework.
 
 ### Usage
 
 ```bash
-# Build fezinator first
+# Build snippex first
 cargo build --release
 
 # Annotate all FEX tests
@@ -220,7 +220,7 @@ cargo build --release
 
 ### Features
 
-- **Automatic Analysis**: Uses Fezinator to analyze assembly and detect live registers
+- **Automatic Analysis**: Uses Snippex to analyze assembly and detect live registers
 - **Smart Architecture Detection**: Auto-detects 32/64-bit from assembly content
 - **Skips Annotated Files**: Won't re-annotate files that already have LIVEIN/LIVEOUT
 - **Batch Processing**: Can annotate multiple files at once
@@ -228,14 +228,14 @@ cargo build --release
 ### Requirements
 
 - Python 3.6+
-- Fezinator binary built (`cargo build --release`)
+- Snippex binary built (`cargo build --release`)
 - NASM assembler (`apt install nasm`)
 
 ### How It Works
 
 1. **Compilation**: Compiles the assembly file to an ELF binary
-2. **Extraction**: Uses `fezinator extract` to extract the code block
-3. **Analysis**: Uses `fezinator analyze` to analyze the block
+2. **Extraction**: Uses `snippex extract` to extract the code block
+3. **Analysis**: Uses `snippex analyze` to analyze the block
 4. **Annotation**: Parses the analysis output and adds comment annotations
 
 ### Output Format

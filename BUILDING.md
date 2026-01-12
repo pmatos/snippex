@@ -1,6 +1,6 @@
-# Building Fezinator
+# Building Snippex
 
-This document describes how to build and test the Fezinator framework.
+This document describes how to build and test the Snippex framework.
 
 ## Prerequisites
 
@@ -22,8 +22,8 @@ cargo build --release
 ```
 
 The compiled binary will be located at:
-- Debug: `target/debug/fezinator`
-- Release: `target/release/fezinator`
+- Debug: `target/debug/snippex`
+- Release: `target/release/snippex`
 
 ## Testing
 
@@ -90,7 +90,7 @@ done:
 
 ### Static Analysis Tools
 
-Fezinator uses several complementary tools for code quality:
+Snippex uses several complementary tools for code quality:
 
 - **cargo-audit**: Security vulnerability scanner
 - **cargo-machete**: Unused dependency detector  

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Assembly Test Annotator for Fezinator
+Assembly Test Annotator for Snippex
 
 Automatically analyzes assembly test files and adds LIVEIN, LIVEOUT, EXITS,
-and MEMORY annotations using Fezinator's analyzer.
+and MEMORY annotations using Snippex's analyzer.
 """
 
 import argparse
@@ -18,8 +18,8 @@ from typing import Dict, List, Optional, Set
 
 
 class TestAnnotator:
-    def __init__(self, fezinator_path: Path, verbose: bool = False, dry_run: bool = False):
-        self.fezinator_path = fezinator_path
+    def __init__(self, snippex_path: Path, verbose: bool = False, dry_run: bool = False):
+        self.snippex_path = snippex_path
         self.verbose = verbose
         self.dry_run = dry_run
         self.stats = {"annotated": 0, "skipped": 0, "errors": 0}
@@ -42,7 +42,7 @@ class TestAnnotator:
         return 64  # Default to 64-bit
 
     def analyze_assembly(self, asm_file: Path, bits: int) -> Optional[Dict]:
-        """Analyze assembly file using Fezinator and return analysis results."""
+        """Analyze assembly file using Snippex and return analysis results."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
             db_path = tmpdir_path / "temp.db"
@@ -89,10 +89,10 @@ class TestAnnotator:
                     print(f"Error linking {asm_file.name}: {result.stderr}")
                     return None
 
-                # Extract with Fezinator
+                # Extract with Snippex
                 result = subprocess.run(
                     [
-                        str(self.fezinator_path),
+                        str(self.snippex_path),
                         "extract",
                         "--database", str(db_path),
                         str(bin_file),
@@ -104,10 +104,10 @@ class TestAnnotator:
                     print(f"Error extracting {asm_file.name}: {result.stderr}")
                     return None
 
-                # Analyze with Fezinator
+                # Analyze with Snippex
                 result = subprocess.run(
                     [
-                        str(self.fezinator_path),
+                        str(self.snippex_path),
                         "analyze",
                         "--database", str(db_path),
                         "1",  # Analyze first block
@@ -127,7 +127,7 @@ class TestAnnotator:
                 return None
 
     def parse_analysis_output(self, output: str) -> Dict:
-        """Parse Fezinator analysis output."""
+        """Parse Snippex analysis output."""
         result = {
             "live_in": set(),
             "live_out": set(),
@@ -300,10 +300,10 @@ def main():
         help="File pattern to match (default: fex_*.asm)",
     )
     parser.add_argument(
-        "--fezinator",
+        "--snippex",
         type=Path,
-        default=Path("target/release/fezinator"),
-        help="Path to fezinator binary (default: target/release/fezinator)",
+        default=Path("target/release/snippex"),
+        help="Path to snippex binary (default: target/release/snippex)",
     )
     parser.add_argument(
         "--dry-run",
@@ -318,9 +318,9 @@ def main():
 
     args = parser.parse_args()
 
-    # Check if fezinator binary exists
-    if not args.fezinator.exists():
-        print(f"Error: Fezinator binary not found at {args.fezinator}")
+    # Check if snippex binary exists
+    if not args.snippex.exists():
+        print(f"Error: Snippex binary not found at {args.snippex}")
         print("Build it first with: cargo build --release")
         sys.exit(1)
 
@@ -330,7 +330,7 @@ def main():
         sys.exit(1)
 
     annotator = TestAnnotator(
-        fezinator_path=args.fezinator,
+        snippex_path=args.snippex,
         verbose=args.verbose,
         dry_run=args.dry_run,
     )

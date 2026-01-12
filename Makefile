@@ -93,7 +93,7 @@ pre-commit: format lint test build audit
 clean:
 	@echo "Cleaning build artifacts..."
 	cargo clean
-	rm -f fezinator.db
+	rm -f snippex.db
 
 # Show help
 help:

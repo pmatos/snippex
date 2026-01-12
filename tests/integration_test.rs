@@ -70,7 +70,7 @@ fn test_extract_command() {
             "--verbose",
         ])
         .output()
-        .expect("Failed to run fezinator");
+        .expect("Failed to run snippex");
 
     assert!(
         output.status.success(),
@@ -129,7 +129,7 @@ fn test_binary_info_storage() {
             db_path.to_str().unwrap(),
         ])
         .output()
-        .expect("Failed to run fezinator");
+        .expect("Failed to run snippex");
 
     let conn = Connection::open(&db_path).unwrap();
 
@@ -177,7 +177,7 @@ fn test_multiple_extractions_same_binary() {
                 db_path.to_str().unwrap(),
             ])
             .output()
-            .expect("Failed to run fezinator");
+            .expect("Failed to run snippex");
     }
 
     let conn = Connection::open(&db_path).unwrap();
@@ -215,7 +215,7 @@ fn test_quiet_mode() {
             "--quiet",
         ])
         .output()
-        .expect("Failed to run fezinator");
+        .expect("Failed to run snippex");
 
     assert!(output.status.success());
     assert!(

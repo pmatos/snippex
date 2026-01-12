@@ -1,10 +1,10 @@
-# Fezinator
+# Snippex
 
 A framework for extracting and analyzing assembly code blocks from ELF and PE binaries.
 
 ## Overview
 
-Fezinator is a Rust-based command-line tool that provides a git-like interface for extracting random assembly code blocks from ELF (Linux) and PE (Windows) binaries. It stores extracted data in an SQLite database for analysis and research purposes.
+Snippex is a Rust-based command-line tool that provides a git-like interface for extracting random assembly code blocks from ELF (Linux) and PE (Windows) binaries. It stores extracted data in an SQLite database for analysis and research purposes.
 
 ## Features
 
@@ -21,13 +21,13 @@ Fezinator is a Rust-based command-line tool that provides a git-like interface f
 
 ```bash
 # Extract a random assembly block from a binary
-fezinator extract /path/to/binary
+snippex extract /path/to/binary
 
 # Extract with verbose output
-fezinator extract /path/to/binary --verbose
+snippex extract /path/to/binary --verbose
 
 # Use custom database location
-fezinator extract /path/to/binary --database my_extractions.db
+snippex extract /path/to/binary --database my_extractions.db
 ```
 
 ## Installation
@@ -36,11 +36,11 @@ fezinator extract /path/to/binary --database my_extractions.db
 
 ```bash
 git clone <repository-url>
-cd fezinator
+cd snippex
 cargo build --release
 ```
 
-The binary will be available at `target/release/fezinator`.
+The binary will be available at `target/release/snippex`.
 
 ## Usage
 
@@ -49,17 +49,17 @@ The binary will be available at `target/release/fezinator`.
 The `extract` command analyzes an ELF or PE binary and extracts a random assembly code block:
 
 ```bash
-fezinator extract <binary_path> [OPTIONS]
+snippex extract <binary_path> [OPTIONS]
 ```
 
 #### Options
 
 - `--verbose, -v`: Enable detailed logging output
-- `--database, -d <path>`: Specify database file (default: `fezinator.db`)
+- `--database, -d <path>`: Specify database file (default: `snippex.db`)
 
 #### What Gets Stored
 
-For each extraction, Fezinator stores:
+For each extraction, Snippex stores:
 
 **Binary Information:**
 - File path and size
@@ -107,7 +107,7 @@ CREATE TABLE extractions (
 ### Basic Extraction
 
 ```bash
-$ fezinator extract /bin/ls --verbose
+$ snippex extract /bin/ls --verbose
 [INFO] Extracting from binary: "/bin/ls"
 [INFO] Binary info: BinaryInfo { path: "/bin/ls", size: 142312, hash: "a1b2c3...", format: "ELF", architecture: "x86_64", endianness: "little" }
 [INFO] Extracted block from 0x4015a0 to 0x4015c8
@@ -118,9 +118,9 @@ $ fezinator extract /bin/ls --verbose
 
 ```bash
 # Extract from the same binary multiple times
-fezinator extract /bin/ls
-fezinator extract /bin/ls  
-fezinator extract /bin/ls
+snippex extract /bin/ls
+snippex extract /bin/ls  
+snippex extract /bin/ls
 
 # Database will contain:
 # - 1 binary record (deduplicated by hash)
@@ -131,7 +131,7 @@ fezinator extract /bin/ls
 
 ```bash
 # No output unless there's an error
-fezinator extract /bin/ls
+snippex extract /bin/ls
 echo $?  # 0 if successful
 ```
 
@@ -139,18 +139,18 @@ echo $?  # 0 if successful
 
 ```bash
 # Automatically detects and supports ELF files
-$ fezinator extract /bin/ls
+$ snippex extract /bin/ls
 # Success: ELF format detected and processed
 
 # Automatically detects and supports PE files  
-$ fezinator extract program.exe
+$ snippex extract program.exe
 # Success: PE format detected and processed
 
 # Rejects unsupported formats with clear error messages
-$ fezinator extract script.sh
+$ snippex extract script.sh
 # Error: Unknown or unsupported binary format. Only ELF and PE formats are supported.
 
-$ fezinator extract archive.zip
+$ snippex extract archive.zip
 # Error: Binary parsing error: ...
 ```
 
@@ -167,7 +167,7 @@ For detailed building instructions, testing procedures, and development workflow
 
 ## Architecture
 
-Fezinator is structured as a modular Rust application:
+Snippex is structured as a modular Rust application:
 
 - **CLI Module**: Command-line interface using `clap`
 - **Extractor Module**: ELF parsing and assembly extraction using `object` crate
@@ -176,7 +176,7 @@ Fezinator is structured as a modular Rust application:
 
 ## Cross-Platform Testing
 
-Fezinator supports cross-platform testing to compare native execution on Intel/AMD64 with emulated execution on ARM64 using FEX-Emu. This enables testing and validation of x86/x86_64 assembly blocks across different host architectures.
+Snippex supports cross-platform testing to compare native execution on Intel/AMD64 with emulated execution on ARM64 using FEX-Emu. This enables testing and validation of x86/x86_64 assembly blocks across different host architectures.
 
 ### Export/Import Workflow
 
@@ -186,16 +186,16 @@ The export/import system allows you to share simulation results between differen
 
 ```bash
 # Extract assembly blocks from binaries
-fezinator extract /path/to/binary
+snippex extract /path/to/binary
 
 # Analyze the extracted blocks
-fezinator analyze 1
+snippex analyze 1
 
 # Run simulations natively on Intel
-fezinator simulate 1 --emulator native
+snippex simulate 1 --emulator native
 
 # Export results for cross-platform comparison
-fezinator export --block 1 --output block1_intel.json
+snippex export --block 1 --output block1_intel.json
 ```
 
 #### 2. Transfer and Import on ARM64 Machine
@@ -205,13 +205,13 @@ fezinator export --block 1 --output block1_intel.json
 scp block1_intel.json arm64-host:~/
 
 # On ARM64 machine, import the results
-fezinator import-results block1_intel.json
+snippex import-results block1_intel.json
 
 # Run simulations with FEX-Emu
-fezinator simulate 1 --emulator fex-emu
+snippex simulate 1 --emulator fex-emu
 
 # Compare native Intel vs FEX-Emu results
-fezinator compare 1 --emulators native,fex-emu --detailed-registers
+snippex compare 1 --emulators native,fex-emu --detailed-registers
 ```
 
 ### Available Commands
@@ -222,13 +222,13 @@ Export simulation data to JSON format for cross-platform sharing:
 
 ```bash
 # Export a specific block
-fezinator export --block 1 --output results.json
+snippex export --block 1 --output results.json
 
 # Export all blocks
-fezinator export --output full_database.json
+snippex export --output full_database.json
 
 # Export only blocks with simulations
-fezinator export --simulated-only --output simulated_blocks.json
+snippex export --simulated-only --output simulated_blocks.json
 ```
 
 #### Import Results Command
@@ -237,16 +237,16 @@ Import simulation data from another machine:
 
 ```bash
 # Import all data from JSON
-fezinator import-results results.json
+snippex import-results results.json
 
 # Import only simulations (skip binaries/extractions)
-fezinator import-results --simulations-only results.json
+snippex import-results --simulations-only results.json
 
 # Skip importing simulations for blocks that already have them
-fezinator import-results --skip-existing-simulations results.json
+snippex import-results --skip-existing-simulations results.json
 
 # Dry run to see what would be imported
-fezinator import-results --dry-run results.json
+snippex import-results --dry-run results.json
 ```
 
 #### Compare Command
@@ -255,21 +255,21 @@ Compare simulation results across different emulators:
 
 ```bash
 # Basic comparison
-fezinator compare 1
+snippex compare 1
 
 # Filter by specific emulators
-fezinator compare 1 --emulators native,fex-emu
+snippex compare 1 --emulators native,fex-emu
 
 # Show detailed register differences
-fezinator compare 1 --detailed-registers --detailed-memory
+snippex compare 1 --detailed-registers --detailed-memory
 
 # Export comparison to JSON
-fezinator compare 1 --export-json comparison_report.json
+snippex compare 1 --export-json comparison_report.json
 ```
 
 ### Host Information Tracking
 
-Fezinator automatically tracks host information in simulation results:
+Snippex automatically tracks host information in simulation results:
 
 - **Host Architecture**: x86_64, aarch64, etc.
 - **Machine ID**: Hostname or generated identifier
@@ -281,15 +281,15 @@ This enables precise identification of where each simulation was performed.
 
 ```bash
 # Intel machine workflow
-fezinator extract /bin/ls
-fezinator analyze 1
-fezinator simulate 1 --emulator native
-fezinator export --block 1 --output ls_intel.json
+snippex extract /bin/ls
+snippex analyze 1
+snippex simulate 1 --emulator native
+snippex export --block 1 --output ls_intel.json
 
 # ARM64 machine workflow
-fezinator import-results ls_intel.json
-fezinator simulate 1 --emulator fex-emu
-fezinator compare 1 --emulators native,fex-emu
+snippex import-results ls_intel.json
+snippex simulate 1 --emulator fex-emu
+snippex compare 1 --emulators native,fex-emu
 
 # Output shows:
 # ✓ Exit codes match: ✓
@@ -310,7 +310,7 @@ This workflow enables systematic testing of FEX-Emu compatibility and performanc
 
 ## Security
 
-Fezinator includes several security measures:
+Snippex includes several security measures:
 
 - **Dependency Auditing**: Automated vulnerability scanning
 - **Unsafe Code Detection**: Tracks unsafe code usage

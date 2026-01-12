@@ -1,10 +1,10 @@
 [package]
-name = "fezinator"
+name = "snippex"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "fezinator"
+name = "snippex"
 path = "src/main.rs"
 
 [dependencies]

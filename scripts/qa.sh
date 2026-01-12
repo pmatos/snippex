@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-# Fezinator Quality Assurance Script
-# This script runs all quality checks for the Fezinator project
+# Snippex Quality Assurance Script
+# This script runs all quality checks for the Snippex project
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -104,7 +104,7 @@ run_check() {
 main() {
     cd "$PROJECT_DIR"
     
-    echo "🔍 Fezinator Quality Assurance"
+    echo "🔍 Snippex Quality Assurance"
     echo "==============================="
     echo
 
@@ -182,7 +182,7 @@ main() {
 
 # Help function
 show_help() {
-    echo "Fezinator Quality Assurance Script"
+    echo "Snippex Quality Assurance Script"
     echo
     echo "Usage: $0 [options]"
     echo

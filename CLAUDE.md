@@ -22,7 +22,7 @@ For development workflow, always run `make pre-commit` before committing changes
 
 ## Code Architecture
 
-Fezinator is a Rust CLI tool for extracting and analyzing assembly code blocks from ELF and PE binaries, with a git-like interface.
+Snippex is a Rust CLI tool for extracting and analyzing assembly code blocks from ELF and PE binaries, with a git-like interface.
 
 ### Core Modules
 - **cli/**: Command-line interface with subcommands (extract, import, list, remove, analyze, simulate)

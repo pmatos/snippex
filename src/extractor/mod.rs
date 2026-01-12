@@ -7,7 +7,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::db::BinaryInfo;
-use crate::error::FezinatorError;
+use crate::error::SnippexError;
 
 const MIN_BLOCK_SIZE: usize = 16;
 
@@ -45,29 +45,29 @@ impl Extractor {
 
     fn detect_format(&self) -> Result<SupportedFormat> {
         let file = object::File::parse(&*self.binary_data)
-            .map_err(|e| FezinatorError::BinaryParsing(e.to_string()))?;
+            .map_err(|e| SnippexError::BinaryParsing(e.to_string()))?;
 
         match file.format() {
             BinaryFormat::Elf => Ok(SupportedFormat::Elf),
             BinaryFormat::Pe => Ok(SupportedFormat::Pe),
-            BinaryFormat::Coff => Err(FezinatorError::InvalidBinary(
+            BinaryFormat::Coff => Err(SnippexError::InvalidBinary(
                 "COFF format is not supported. Please use PE format for Windows binaries.".into(),
             )
             .into()),
-            BinaryFormat::MachO => Err(FezinatorError::InvalidBinary(
+            BinaryFormat::MachO => Err(SnippexError::InvalidBinary(
                 "Mach-O format is not supported. Only ELF and PE formats are supported.".into(),
             )
             .into()),
-            BinaryFormat::Wasm => Err(FezinatorError::InvalidBinary(
+            BinaryFormat::Wasm => Err(SnippexError::InvalidBinary(
                 "WebAssembly format is not supported. Only ELF and PE formats are supported."
                     .into(),
             )
             .into()),
-            BinaryFormat::Xcoff => Err(FezinatorError::InvalidBinary(
+            BinaryFormat::Xcoff => Err(SnippexError::InvalidBinary(
                 "XCOFF format is not supported. Only ELF and PE formats are supported.".into(),
             )
             .into()),
-            _ => Err(FezinatorError::InvalidBinary(
+            _ => Err(SnippexError::InvalidBinary(
                 "Unknown or unsupported binary format. Only ELF and PE formats are supported."
                     .into(),
             )
@@ -80,7 +80,7 @@ impl Extractor {
             match file.architecture() {
                 Architecture::X86_64 => "x86_64",
                 Architecture::I386 => "i386",
-                _ => return Err(FezinatorError::InvalidBinary(
+                _ => return Err(SnippexError::InvalidBinary(
                     "Unsupported architecture. Only x86 and x86_64 architectures are supported."
                         .into(),
                 )
@@ -98,7 +98,7 @@ impl Extractor {
 
     pub fn get_binary_info(&self) -> Result<BinaryInfo> {
         let file = object::File::parse(&*self.binary_data)
-            .map_err(|e| FezinatorError::BinaryParsing(e.to_string()))?;
+            .map_err(|e| SnippexError::BinaryParsing(e.to_string()))?;
 
         let format = self.detect_format()?;
         let (architecture, endianness) = self.get_architecture_info(&file)?;
@@ -141,7 +141,7 @@ impl Extractor {
             }
         }
 
-        Err(FezinatorError::InvalidBinary("No executable section found".into()).into())
+        Err(SnippexError::InvalidBinary("No executable section found".into()).into())
     }
 
     pub fn create_capstone(&self) -> Result<capstone::Capstone> {
@@ -154,7 +154,7 @@ impl Extractor {
                 .detail(false)
                 .build()
                 .map_err(|e| {
-                    FezinatorError::BinaryParsing(format!("Failed to create x86 capstone: {e}"))
+                    SnippexError::BinaryParsing(format!("Failed to create x86 capstone: {e}"))
                 })?,
             "x86_64" => capstone::Capstone::new()
                 .x86()
@@ -162,10 +162,10 @@ impl Extractor {
                 .detail(false)
                 .build()
                 .map_err(|e| {
-                    FezinatorError::BinaryParsing(format!("Failed to create x86_64 capstone: {e}"))
+                    SnippexError::BinaryParsing(format!("Failed to create x86_64 capstone: {e}"))
                 })?,
             _ => {
-                return Err(FezinatorError::InvalidBinary(format!(
+                return Err(SnippexError::InvalidBinary(format!(
                     "Unsupported architecture for disassembly: {}",
                     binary_info.architecture
                 ))
@@ -178,16 +178,16 @@ impl Extractor {
 
     pub fn extract_random_aligned_block(&self) -> Result<(u64, u64, Vec<u8>)> {
         let file = object::File::parse(&*self.binary_data)
-            .map_err(|e| FezinatorError::BinaryParsing(e.to_string()))?;
+            .map_err(|e| SnippexError::BinaryParsing(e.to_string()))?;
 
         let text_section = self.find_executable_section(&file)?;
 
         let section_data = text_section
             .data()
-            .map_err(|e| FezinatorError::BinaryParsing(e.to_string()))?;
+            .map_err(|e| SnippexError::BinaryParsing(e.to_string()))?;
 
         if section_data.is_empty() {
-            return Err(FezinatorError::InvalidBinary("Empty executable section".into()).into());
+            return Err(SnippexError::InvalidBinary("Empty executable section".into()).into());
         }
 
         let section_addr = text_section.address();
@@ -195,12 +195,12 @@ impl Extractor {
 
         // Disassemble the entire section to get instruction boundaries
         let insns = cs.disasm_all(section_data, section_addr).map_err(|e| {
-            FezinatorError::BinaryParsing(format!("Failed to disassemble section: {e}"))
+            SnippexError::BinaryParsing(format!("Failed to disassemble section: {e}"))
         })?;
 
         if insns.len() < 2 {
             return Err(
-                FezinatorError::InvalidBinary("Not enough instructions in section".into()).into(),
+                SnippexError::InvalidBinary("Not enough instructions in section".into()).into(),
             );
         }
 
@@ -211,7 +211,7 @@ impl Extractor {
         let max_instructions = std::cmp::min(32, insns.len() - 1);
 
         if min_instructions >= max_instructions {
-            return Err(FezinatorError::InvalidBinary(
+            return Err(SnippexError::InvalidBinary(
                 "Section too small for block extraction".into(),
             )
             .into());
@@ -274,9 +274,7 @@ impl Extractor {
         let end_offset = (end_addr - section_addr) as usize;
 
         if end_offset > section_data.len() {
-            return Err(
-                FezinatorError::InvalidBinary("Block extends beyond section".into()).into(),
-            );
+            return Err(SnippexError::InvalidBinary("Block extends beyond section".into()).into());
         }
 
         let assembly_block = section_data[start_offset..end_offset].to_vec();
@@ -286,23 +284,23 @@ impl Extractor {
 
     pub fn extract_range(&self, start_addr: u64, end_addr: u64) -> Result<(u64, u64, Vec<u8>)> {
         if start_addr >= end_addr {
-            return Err(FezinatorError::InvalidBinary(
+            return Err(SnippexError::InvalidBinary(
                 "Start address must be less than end address".into(),
             )
             .into());
         }
 
         let file = object::File::parse(&*self.binary_data)
-            .map_err(|e| FezinatorError::BinaryParsing(e.to_string()))?;
+            .map_err(|e| SnippexError::BinaryParsing(e.to_string()))?;
 
         let text_section = self.find_executable_section(&file)?;
 
         let section_data = text_section
             .data()
-            .map_err(|e| FezinatorError::BinaryParsing(e.to_string()))?;
+            .map_err(|e| SnippexError::BinaryParsing(e.to_string()))?;
 
         if section_data.is_empty() {
-            return Err(FezinatorError::InvalidBinary("Empty executable section".into()).into());
+            return Err(SnippexError::InvalidBinary("Empty executable section".into()).into());
         }
 
         let section_addr = text_section.address();
@@ -310,7 +308,7 @@ impl Extractor {
 
         // Validate that addresses are within the section
         if start_addr < section_addr || end_addr > section_end {
-            return Err(FezinatorError::InvalidBinary(format!(
+            return Err(SnippexError::InvalidBinary(format!(
                 "Address range 0x{start_addr:x}-0x{end_addr:x} is outside executable section (0x{section_addr:x}-0x{section_end:x})"
             ))
             .into());
@@ -320,13 +318,13 @@ impl Extractor {
 
         // Disassemble the entire section to verify instruction alignment
         let insns = cs.disasm_all(section_data, section_addr).map_err(|e| {
-            FezinatorError::BinaryParsing(format!("Failed to disassemble section: {e}"))
+            SnippexError::BinaryParsing(format!("Failed to disassemble section: {e}"))
         })?;
 
         // Verify start address is instruction-aligned
         let start_instruction = insns.iter().find(|insn| insn.address() == start_addr);
         if start_instruction.is_none() {
-            return Err(FezinatorError::InvalidBinary(format!(
+            return Err(SnippexError::InvalidBinary(format!(
                 "Start address 0x{start_addr:x} is not instruction-aligned"
             ))
             .into());
@@ -357,7 +355,7 @@ impl Extractor {
             });
 
             if !valid_end {
-                return Err(FezinatorError::InvalidBinary(format!(
+                return Err(SnippexError::InvalidBinary(format!(
                     "End address 0x{end_addr:x} is not instruction-aligned"
                 ))
                 .into());
@@ -372,13 +370,13 @@ impl Extractor {
 
         // Verify the extracted block contains valid instructions
         let block_insns = cs.disasm_all(&assembly_block, start_addr).map_err(|e| {
-            FezinatorError::BinaryParsing(format!(
+            SnippexError::BinaryParsing(format!(
                 "Extracted block contains invalid instructions: {e}"
             ))
         })?;
 
         if block_insns.is_empty() {
-            return Err(FezinatorError::InvalidBinary(
+            return Err(SnippexError::InvalidBinary(
                 "Extracted range contains no valid instructions".into(),
             )
             .into());
