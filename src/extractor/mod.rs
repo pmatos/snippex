@@ -261,7 +261,7 @@ impl Extractor {
         };
 
         if (final_end_addr - start_addr) < MIN_BLOCK_SIZE as u64 {
-            return Err(FezinatorError::InvalidBinary(format!(
+            return Err(SnippexError::InvalidBinary(format!(
                 "Cannot extract block of at least {MIN_BLOCK_SIZE} bytes from section"
             ))
             .into());
