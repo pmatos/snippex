@@ -94,7 +94,7 @@ fn test_extract_command() {
         .query_row(
             "SELECT start_address, end_address, LENGTH(assembly_block) FROM extractions",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get::<_, i64>(2)? as usize)),
         )
         .unwrap();
 

@@ -169,7 +169,7 @@ impl Database {
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                         params![
                             binary_info.path,
-                            binary_info.size,
+                            binary_info.size as i64,
                             binary_info.hash,
                             binary_info.format,
                             binary_info.architecture,
@@ -184,7 +184,12 @@ impl Database {
         tx.execute(
             "INSERT INTO extractions (binary_id, start_address, end_address, assembly_block)
              VALUES (?1, ?2, ?3, ?4)",
-            params![binary_id, start_addr, end_addr, assembly_block],
+            params![
+                binary_id,
+                start_addr as i64,
+                end_addr as i64,
+                assembly_block
+            ],
         )?;
 
         tx.commit()?;
@@ -222,8 +227,8 @@ impl Database {
                     binary_hash: row.get(1)?,
                     binary_format: row.get(2)?,
                     binary_architecture: row.get(3)?,
-                    start_address: row.get(4)?,
-                    end_address: row.get(5)?,
+                    start_address: row.get::<_, i64>(4)? as u64,
+                    end_address: row.get::<_, i64>(5)? as u64,
                     assembly_block: row.get(6)?,
                     created_at: row.get(7)?,
                     analysis_status: row.get(9)?,
@@ -252,9 +257,9 @@ impl Database {
 
         // Delete the extraction
         let affected = tx.execute(
-            "DELETE FROM extractions 
+            "DELETE FROM extractions
              WHERE binary_id = ?1 AND start_address = ?2 AND end_address = ?3",
-            params![binary_id, start_addr, end_addr],
+            params![binary_id, start_addr as i64, end_addr as i64],
         )?;
 
         if affected == 0 {
@@ -281,8 +286,9 @@ impl Database {
         let tx = self.conn.transaction()?;
 
         // Count extractions before deletion
-        let count: usize =
-            tx.query_row("SELECT COUNT(*) FROM extractions", [], |row| row.get(0))?;
+        let count: usize = tx.query_row("SELECT COUNT(*) FROM extractions", [], |row| {
+            row.get::<_, i64>(0)
+        })? as usize;
 
         // Delete in correct order due to foreign key constraints:
         // 1. Delete all analyses first (references extractions)
@@ -312,7 +318,7 @@ impl Database {
             "SELECT e.id FROM extractions e
              JOIN binaries b ON e.binary_id = b.id
              WHERE b.hash = ?1 AND e.start_address = ?2 AND e.end_address = ?3",
-            params![binary_hash, start_addr, end_addr],
+            params![binary_hash, start_addr as i64, end_addr as i64],
             |row| row.get(0),
         )?;
 
@@ -332,13 +338,13 @@ impl Database {
 
         // Insert or update analysis
         tx.execute(
-            "INSERT OR REPLACE INTO analyses 
-             (extraction_id, instructions_count, live_in_registers, live_out_registers, 
+            "INSERT OR REPLACE INTO analyses
+             (extraction_id, instructions_count, live_in_registers, live_out_registers,
               exit_points, memory_accesses)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 extraction_id,
-                analysis.instructions_count,
+                analysis.instructions_count as i64,
                 live_in_regs.join(","),
                 live_out_regs.join(","),
                 exit_points_json,
@@ -387,7 +393,7 @@ impl Database {
                 initial_memory,
                 final_registers,
                 final_memory,
-                result.final_state.flags,
+                result.final_state.flags as i64,
                 result.execution_time.as_nanos() as i64,
                 result.exit_code,
                 result.emulator_used,
@@ -474,7 +480,7 @@ impl Database {
         let binary_info = stmt.query_row(params![hash], |row| {
             Ok(BinaryInfo {
                 path: row.get(0)?,
-                size: row.get(1)?,
+                size: row.get::<_, i64>(1)? as u64,
                 hash: row.get(2)?,
                 format: row.get(3)?,
                 architecture: row.get(4)?,
@@ -503,7 +509,7 @@ impl Database {
             let initial_memory_json: String = row.get(2)?;
             let final_registers_json: String = row.get(3)?;
             let final_memory_json: String = row.get(4)?;
-            let final_flags: u64 = row.get(5)?;
+            let final_flags: u64 = row.get::<_, i64>(5)? as u64;
             let execution_time_ns: i64 = row.get(6)?;
             let exit_code: i32 = row.get(7)?;
             let emulator_used: Option<String> = row.get(8)?;
@@ -606,7 +612,7 @@ impl Database {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 binary_info.path,
-                binary_info.size,
+                binary_info.size as i64,
                 binary_info.hash,
                 binary_info.format,
                 binary_info.architecture,
