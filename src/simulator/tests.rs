@@ -7,6 +7,7 @@ mod tests {
 
     fn create_mock_extraction() -> ExtractionInfo {
         ExtractionInfo {
+            id: 1,
             binary_path: "/test/binary".to_string(),
             binary_hash: "abcdef123456".to_string(),
             binary_format: "ELF".to_string(),

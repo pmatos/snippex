@@ -20,6 +20,7 @@ pub struct BinaryInfo {
 
 #[derive(Debug, Clone)]
 pub struct ExtractionInfo {
+    pub id: i64,
     pub binary_path: String,
     pub binary_hash: String,
     pub binary_format: String,
@@ -223,6 +224,7 @@ impl Database {
         let extractions = stmt
             .query_map([], |row| {
                 Ok(ExtractionInfo {
+                    id: row.get(8)?,
                     binary_path: row.get(0)?,
                     binary_hash: row.get(1)?,
                     binary_format: row.get(2)?,

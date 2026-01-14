@@ -186,25 +186,9 @@ impl SimulateCommand {
 
     fn get_extraction_id(
         &self,
-        db: &Database,
+        _db: &Database,
         extraction: &crate::db::ExtractionInfo,
     ) -> Result<i64> {
-        // Find the extraction ID by matching the extraction info
-        // This is a simplified approach - in a real implementation,
-        // we might want to store the ID in ExtractionInfo
-        let extractions = db.list_extractions()?;
-
-        for (idx, ext) in extractions.iter().enumerate() {
-            if ext.binary_path == extraction.binary_path
-                && ext.start_address == extraction.start_address
-                && ext.end_address == extraction.end_address
-                && ext.binary_hash == extraction.binary_hash
-            {
-                // Return 1-based index as ID (this is a simplification)
-                return Ok((idx + 1) as i64);
-            }
-        }
-
-        Err(anyhow!("Extraction not found in database"))
+        Ok(extraction.id)
     }
 }
