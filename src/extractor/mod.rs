@@ -1,6 +1,6 @@
 use anyhow::Result;
 use capstone::prelude::*;
-use object::{Architecture, BinaryFormat, Object, ObjectSection, SectionKind};
+use object::{Architecture, BinaryFormat, Object, ObjectSection, ObjectSegment, SectionKind};
 use rand::Rng;
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -107,6 +107,22 @@ impl Extractor {
         hasher.update(&self.binary_data);
         let hash = format!("{:x}", hasher.finalize());
 
+        // Extract base address from ELF (first LOAD segment virtual address)
+        // Default to 0x400000 (common non-PIE base) if not found
+        let base_address = file
+            .segments()
+            .filter_map(|segment| {
+                // Get the first segment with a non-zero address
+                let addr = segment.address();
+                if addr > 0 {
+                    Some(addr)
+                } else {
+                    None
+                }
+            })
+            .min() // Get the lowest non-zero address
+            .unwrap_or(0x400000);
+
         Ok(BinaryInfo {
             path: self.binary_path.to_string_lossy().to_string(),
             size: self.binary_data.len() as u64,
@@ -114,6 +130,7 @@ impl Extractor {
             format: format.as_str().to_string(),
             architecture,
             endianness,
+            base_address,
         })
     }
 

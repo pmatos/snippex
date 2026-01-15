@@ -318,6 +318,7 @@ impl ImportCommand {
             format: "NASM-Import".to_string(),
             architecture: architecture.to_string(),
             endianness: "little".to_string(), // x86/x86_64 are little endian
+            base_address: 0x400000, // Default base address for imported NASM files
         })
     }
 }
