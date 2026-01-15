@@ -1,3 +1,123 @@
+//! Sandbox memory management for safe assembly block execution.
+//!
+//! This module implements address translation to map binary address spaces into a
+//! controlled sandbox memory region. This enables simulation of extracted assembly
+//! blocks that reference memory addresses from their original binary context.
+//!
+//! # Overview
+//!
+//! The sandbox solves a critical problem: extracted assembly blocks often contain
+//! memory references tied to the original binary's address space (e.g., 0x555555000000
+//! for PIE binaries). Without translation, these references fail during simulation
+//! because the simulator uses a different address space.
+//!
+//! # Key Features
+//!
+//! - **Linear Address Translation**: Maps original addresses to sandbox space while
+//!   preserving relative offsets (critical for RIP-relative addressing)
+//! - **Section Management**: Tracks .text, .data, .rodata, .bss sections with metadata
+//! - **Memory Allocation**: Prepares memory regions for simulator execution
+//! - **Bounds Checking**: Validates all addresses stay within sandbox limits
+//!
+//! # Architecture
+//!
+//! ```text
+//! Original Binary (0x555555554000):     Sandbox (0x10000000):
+//! ┌──────────────────────────┐         ┌──────────────────────────┐
+//! │ 0x555555555000: .text    │   -->   │ 0x10001000: .text        │
+//! │ 0x555555565000: .data    │   -->   │ 0x10011000: .data        │
+//! │ 0x555555575000: .rodata  │   -->   │ 0x10021000: .rodata      │
+//! └──────────────────────────┘         └──────────────────────────┘
+//! ```
+//!
+//! # Limitations
+//!
+//! The sandbox has important constraints that users should understand:
+//!
+//! ## 1. System Calls Not Supported
+//!
+//! Assembly blocks that execute system calls (syscall, int 0x80) will fail or
+//! produce incorrect results. The sandbox cannot intercept or emulate system calls.
+//!
+//! **Impact**: Blocks with I/O operations, memory allocation (mmap, brk), or
+//! process control will not simulate correctly.
+//!
+//! **Workaround**: Focus on computational blocks without system calls for testing.
+//!
+//! ## 2. External Function Calls
+//!
+//! Calls to library functions (libc, etc.) are not resolved. The sandbox only
+//! contains the extracted block's code and data sections.
+//!
+//! **Impact**: Blocks calling printf, malloc, or any external function will crash.
+//!
+//! **Workaround**: Only test self-contained blocks without external dependencies.
+//!
+//! ## 3. Thread-Local Storage (TLS)
+//!
+//! TLS accesses (%fs, %gs segment registers) are not set up. Modern binaries
+//! often use TLS for stack canaries and other security features.
+//!
+//! **Impact**: Blocks accessing TLS will segfault or produce incorrect results.
+//!
+//! **Workaround**: Avoid blocks with stack protector or TLS-dependent code.
+//!
+//! ## 4. Size Limitations
+//!
+//! The sandbox is limited to 256MB (SANDBOX_SIZE). Binaries with large sections
+//! or high base addresses may exceed this limit.
+//!
+//! **Impact**: Address translation may fail for large binaries or those loaded
+//! at very high addresses.
+//!
+//! **Workaround**: Test with reasonably-sized binaries (most typical programs work).
+//!
+//! ## 5. Dynamic Memory
+//!
+//! Heap allocations (new, malloc) that occurred before extraction are not captured.
+//! Only static sections (.data, .rodata, .bss) are available.
+//!
+//! **Impact**: Blocks accessing heap data will fail unless the data is in static sections.
+//!
+//! **Workaround**: Focus on blocks operating on static data or registers.
+//!
+//! # Usage Example
+//!
+//! ```ignore
+//! use snippex::simulator::{SandboxMemoryLayout, SANDBOX_BASE};
+//! use snippex::extractor::section_loader::BinarySectionLoader;
+//!
+//! // Load binary and get base address
+//! let loader = BinarySectionLoader::new("/bin/ls")?;
+//! let base_address = /* parse from ELF headers */;
+//!
+//! // Create sandbox
+//! let mut sandbox = SandboxMemoryLayout::new(base_address);
+//!
+//! // Load sections
+//! let (text_meta, text_data) = loader.extract_text_section()?;
+//! sandbox.add_section(text_meta, Some(text_data))?;
+//!
+//! // Translate addresses for simulation
+//! let original_addr = 0x555555555000;
+//! let sandbox_addr = sandbox.translate_to_sandbox(original_addr)?;
+//!
+//! // Allocate memory for simulator
+//! let memory = sandbox.allocate_memory_region()?;
+//! ```
+//!
+//! # Safety Guarantees
+//!
+//! The sandbox provides isolation through:
+//! - Address validation (all translations checked against bounds)
+//! - No direct memory access outside sandbox range
+//! - Section-based access control (read-only .rodata, executable .text)
+//!
+//! However, the sandbox cannot prevent:
+//! - Buffer overflows within a section
+//! - Incorrect memory accesses due to bugs in the assembly block
+//! - Side effects from system calls (if attempted)
+
 use anyhow::Result;
 use std::collections::HashMap;
 
