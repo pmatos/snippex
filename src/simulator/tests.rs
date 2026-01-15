@@ -69,7 +69,7 @@ mod tests {
         initial_state.set_register("rax", 0x1234567890abcdef);
         initial_state.set_register("rbx", 0xdeadbeefcafebabe);
 
-        let result = generator.generate_simulation_file(&extraction, &analysis, &initial_state);
+        let result = generator.generate_simulation_file(&extraction, &analysis, &initial_state, None);
 
         assert!(result.is_ok());
         let assembly = result.unwrap();

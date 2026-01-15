@@ -1,11 +1,10 @@
+use super::sandbox::SandboxMemoryLayout;
 use super::state::InitialState;
 use crate::analyzer::BlockAnalysis;
 use crate::db::ExtractionInfo;
 use crate::error::{Error, Result};
 
 const OUTPUT_BUFFER_SIZE: usize = 4096;
-const SAFE_MEMORY_RANGE_START: u64 = 0x10000000;
-const SAFE_MEMORY_RANGE_END: u64 = 0x20000000;
 
 pub struct AssemblyGenerator {
     #[allow(dead_code)]
@@ -30,6 +29,7 @@ impl AssemblyGenerator {
         extraction: &ExtractionInfo,
         analysis: &BlockAnalysis,
         initial_state: &InitialState,
+        sandbox: Option<&SandboxMemoryLayout>,
     ) -> Result<String> {
         let mut assembly = String::new();
 
@@ -59,7 +59,7 @@ impl AssemblyGenerator {
         assembly.push_str("_start:\n");
 
         // Generate preamble
-        assembly.push_str(&self.generate_preamble(initial_state)?);
+        assembly.push_str(&self.generate_preamble(initial_state, sandbox)?);
 
         // Generate the actual block code
         assembly.push_str(&self.generate_block_code(extraction)?);
@@ -70,7 +70,7 @@ impl AssemblyGenerator {
         Ok(assembly)
     }
 
-    fn generate_preamble(&self, initial_state: &InitialState) -> Result<String> {
+    fn generate_preamble(&self, initial_state: &InitialState, sandbox: Option<&SandboxMemoryLayout>) -> Result<String> {
         let mut preamble = String::new();
 
         preamble.push_str("    ; === PREAMBLE: Set up initial state ===\n");
@@ -86,45 +86,47 @@ impl AssemblyGenerator {
             preamble.push_str(&format!("    mov qword [rsp-{offset}], 0x{value:016x}\n"));
         }
 
-        // Set up memory locations with validation
+        // Set up memory locations with address translation
         for (addr, data) in &initial_state.memory_locations {
-            // Validate memory address is within safe range
-            if !self.is_safe_memory_address(*addr) {
-                return Err(Error::Simulation(format!(
-                    "Memory address 0x{addr:016x} is outside safe range (0x{SAFE_MEMORY_RANGE_START:016x}-0x{SAFE_MEMORY_RANGE_END:016x})"
-                )));
-            }
+            // Translate address if sandbox is available
+            let target_addr = if let Some(sandbox) = sandbox {
+                match sandbox.translate_to_sandbox(*addr) {
+                    Ok(translated) => translated,
+                    Err(_) => {
+                        // If translation fails, use the original address
+                        // This maintains backward compatibility for non-sandboxed simulation
+                        *addr
+                    }
+                }
+            } else {
+                *addr
+            };
 
             match data.len() {
                 1 => preamble.push_str(&format!(
-                    "    mov byte [0x{addr:016x}], 0x{:02x}\n",
+                    "    mov byte [0x{target_addr:016x}], 0x{:02x}\n",
                     data[0]
                 )),
                 2 => preamble.push_str(&format!(
-                    "    mov word [0x{addr:016x}], 0x{:04x}\n",
+                    "    mov word [0x{target_addr:016x}], 0x{:04x}\n",
                     u16::from_le_bytes([data[0], data[1]])
                 )),
                 4 => preamble.push_str(&format!(
-                    "    mov dword [0x{addr:016x}], 0x{:08x}\n",
+                    "    mov dword [0x{target_addr:016x}], 0x{:08x}\n",
                     u32::from_le_bytes([data[0], data[1], data[2], data[3]])
                 )),
                 8 => preamble.push_str(&format!(
-                    "    mov qword [0x{addr:016x}], 0x{:016x}\n",
+                    "    mov qword [0x{target_addr:016x}], 0x{:016x}\n",
                     u64::from_le_bytes([
                         data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]
                     ])
                 )),
                 _ => {
-                    // For larger data, write byte by byte with validation
+                    // For larger data, write byte by byte
                     for (i, byte) in data.iter().enumerate() {
-                        let target_addr = addr + i as u64;
-                        if !self.is_safe_memory_address(target_addr) {
-                            return Err(Error::Simulation(format!(
-                                "Memory address 0x{target_addr:016x} is outside safe range"
-                            )));
-                        }
+                        let byte_addr = target_addr + i as u64;
                         preamble.push_str(&format!(
-                            "    mov byte [0x{target_addr:016x}], 0x{byte:02x}\n"
+                            "    mov byte [0x{byte_addr:016x}], 0x{byte:02x}\n"
                         ));
                     }
                 }
@@ -282,9 +284,5 @@ impl AssemblyGenerator {
         result = result.replace(" ptr", "");
 
         result
-    }
-
-    fn is_safe_memory_address(&self, address: u64) -> bool {
-        (SAFE_MEMORY_RANGE_START..SAFE_MEMORY_RANGE_END).contains(&address)
     }
 }

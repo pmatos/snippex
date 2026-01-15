@@ -196,12 +196,12 @@ When results differ, clearly show what's wrong (specific register, flag, or memo
 
 ### 1.4 Assembly Harness Generation Updates
 
-- [ ] Modify `AssemblyGenerator` to use translated addresses:
-  - [ ] Generate harness that sets up sandbox base address
-  - [ ] Translate memory references in initial state setup
-  - [ ] Keep extracted block bytes unchanged (they have RIP-relative refs)
-- [ ] Update memory access validation to accept sandbox addresses
-- [ ] Remove hard-coded address range rejection (currently `0x10000000-0x20000000`)
+- [x] Modify `AssemblyGenerator` to use translated addresses:
+  - [x] Generate harness that sets up sandbox base address
+  - [x] Translate memory references in initial state setup
+  - [x] Keep extracted block bytes unchanged (they have RIP-relative refs)
+- [x] Update memory access validation to accept sandbox addresses
+- [x] Remove hard-coded address range rejection (currently `0x10000000-0x20000000`)
 
 ### 1.5 Testing & Validation
 

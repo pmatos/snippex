@@ -87,10 +87,12 @@ impl Simulator {
         let initial_state = self.random_generator.generate_initial_state(analysis);
 
         // Generate assembly file
+        // TODO: Create and pass SandboxMemoryLayout once binary section loading is integrated
         let assembly_source = self.assembly_generator.generate_simulation_file(
             extraction,
             analysis,
             &initial_state,
+            None, // No sandbox for now - maintains backward compatibility
         )?;
 
         // Compile and link
