@@ -179,20 +179,20 @@ When results differ, clearly show what's wrong (specific register, flag, or memo
 
 ### 1.3 Sandbox Memory Manager
 
-- [ ] Design `SandboxMemoryLayout`:
-  - [ ] Sandbox base: `0x10000000` (256MB region)
-  - [ ] Map original binary base → sandbox base
-  - [ ] Calculate offsets for each section
-- [ ] Implement address translation:
-  - [ ] `translate_to_sandbox(original_addr: u64) -> u64`
-  - [ ] `is_in_original_range(addr: u64) -> bool`
-  - [ ] Handle out-of-range addresses gracefully
-- [ ] Implement sandbox initialization:
-  - [ ] Allocate sandbox memory region
-  - [ ] Copy `.text` section to sandbox
-  - [ ] Copy `.data` section to sandbox
-  - [ ] Copy `.rodata` section to sandbox
-  - [ ] Zero-initialize `.bss` section
+- [x] Design `SandboxMemoryLayout`:
+  - [x] Sandbox base: `0x10000000` (256MB region)
+  - [x] Map original binary base → sandbox base
+  - [x] Calculate offsets for each section
+- [x] Implement address translation:
+  - [x] `translate_to_sandbox(original_addr: u64) -> u64`
+  - [x] `is_in_original_range(addr: u64) -> bool`
+  - [x] Handle out-of-range addresses gracefully
+- [x] Implement sandbox initialization:
+  - [x] Allocate sandbox memory region
+  - [x] Copy `.text` section to sandbox
+  - [x] Copy `.data` section to sandbox
+  - [x] Copy `.rodata` section to sandbox
+  - [x] Zero-initialize `.bss` section
 
 ### 1.4 Assembly Harness Generation Updates
 

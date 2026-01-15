@@ -16,6 +16,9 @@ pub enum SnippexError {
 
     #[error("Simulation error: {0}")]
     Simulation(String),
+
+    #[error("Address out of range: {0}")]
+    AddressOutOfRange(String),
 }
 
 pub type Error = SnippexError;

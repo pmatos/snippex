@@ -3,6 +3,7 @@ pub mod compilation;
 pub mod emulator;
 pub mod execution;
 pub mod random_generator;
+pub mod sandbox;
 pub mod state;
 
 #[cfg(test)]
@@ -20,6 +21,7 @@ pub use compilation::CompilationPipeline;
 pub use emulator::EmulatorConfig;
 pub use execution::ExecutionHarness;
 pub use random_generator::RandomStateGenerator;
+pub use sandbox::{SandboxMemoryLayout, SectionMapping, SANDBOX_BASE, SANDBOX_SIZE};
 pub use state::{FinalState, InitialState};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
