@@ -5,6 +5,7 @@ use std::path::Path;
 use crate::error::SnippexError;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct SectionMetadata {
     pub name: String,
     pub offset: u64,
@@ -28,6 +29,7 @@ impl BinarySectionLoader {
         Ok(BinarySectionLoader { binary_data })
     }
 
+    #[allow(dead_code)]
     pub fn from_bytes(binary_data: Vec<u8>) -> Self {
         BinarySectionLoader { binary_data }
     }
@@ -44,6 +46,7 @@ impl BinarySectionLoader {
         self.extract_section_by_name(".rodata")
     }
 
+    #[allow(dead_code)]
     pub fn extract_bss_section(&self) -> Result<SectionMetadata> {
         let file = object::File::parse(&*self.binary_data)
             .map_err(|e| SnippexError::BinaryParsing(e.to_string()))?;
@@ -56,6 +59,7 @@ impl BinarySectionLoader {
         Ok(metadata)
     }
 
+    #[allow(dead_code)]
     pub fn extract_all_sections(&self) -> Result<Vec<(SectionMetadata, Option<Vec<u8>>)>> {
         let file = object::File::parse(&*self.binary_data)
             .map_err(|e| SnippexError::BinaryParsing(e.to_string()))?;
@@ -76,9 +80,12 @@ impl BinarySectionLoader {
             let data = if name == ".bss" {
                 None
             } else {
-                Some(section.data()
-                    .map_err(|e| SnippexError::BinaryParsing(e.to_string()))?
-                    .to_vec())
+                Some(
+                    section
+                        .data()
+                        .map_err(|e| SnippexError::BinaryParsing(e.to_string()))?
+                        .to_vec(),
+                )
             };
 
             sections.push((metadata, data));
@@ -91,11 +98,9 @@ impl BinarySectionLoader {
         let file = object::File::parse(&*self.binary_data)
             .map_err(|e| SnippexError::BinaryParsing(e.to_string()))?;
 
-        let section = file
-            .section_by_name(section_name)
-            .ok_or_else(|| {
-                SnippexError::InvalidBinary(format!("{} section not found", section_name))
-            })?;
+        let section = file.section_by_name(section_name).ok_or_else(|| {
+            SnippexError::InvalidBinary(format!("{} section not found", section_name))
+        })?;
 
         let metadata = self.create_section_metadata(&section)?;
         let data = section
@@ -106,7 +111,10 @@ impl BinarySectionLoader {
         Ok((metadata, data))
     }
 
-    fn create_section_metadata<'a>(&self, section: &object::Section<'a, 'a>) -> Result<SectionMetadata> {
+    fn create_section_metadata<'a>(
+        &self,
+        section: &object::Section<'a, 'a>,
+    ) -> Result<SectionMetadata> {
         let name = section.name().unwrap_or("").to_string();
         let offset = section.file_range().map(|(off, _)| off).unwrap_or(0);
         let size = section.size();
@@ -116,7 +124,8 @@ impl BinarySectionLoader {
         // Determine permissions based on section name and kind
         // This is a simplified approach that works for common sections
         let is_executable = name == ".text" || section.kind() == object::SectionKind::Text;
-        let is_writable = name == ".data" || name == ".bss" || section.kind() == object::SectionKind::Data;
+        let is_writable =
+            name == ".data" || name == ".bss" || section.kind() == object::SectionKind::Data;
         let is_readable = true; // Most sections are readable
 
         Ok(SectionMetadata {
@@ -131,14 +140,17 @@ impl BinarySectionLoader {
         })
     }
 
+    #[allow(dead_code)]
     pub fn load_section_bytes(&self, offset: u64, size: u64) -> Result<Vec<u8>> {
         let start = offset as usize;
         let end = start + size as usize;
 
         if end > self.binary_data.len() {
-            return Err(SnippexError::InvalidBinary(
-                format!("Section extends beyond file bounds: offset={}, size={}", offset, size)
-            ).into());
+            return Err(SnippexError::InvalidBinary(format!(
+                "Section extends beyond file bounds: offset={}, size={}",
+                offset, size
+            ))
+            .into());
         }
 
         Ok(self.binary_data[start..end].to_vec())

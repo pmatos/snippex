@@ -142,6 +142,26 @@ impl AnalyzeCommand {
                 println!();
             }
         }
+        println!();
+
+        println!("Pointer Registers ({}):", analysis.pointer_registers.len());
+        if analysis.pointer_registers.is_empty() {
+            println!("  <none>");
+        } else {
+            for (reg, usage) in &analysis.pointer_registers {
+                print!("  - {}: ", reg);
+                print!("offsets [{}, {}]", usage.min_offset, usage.max_offset);
+                print!(", max_size={}", usage.max_access_size);
+                if usage.has_reads && usage.has_writes {
+                    print!(" (read/write)");
+                } else if usage.has_reads {
+                    print!(" (read)");
+                } else if usage.has_writes {
+                    print!(" (write)");
+                }
+                println!();
+            }
+        }
 
         if self.verbose {
             println!();

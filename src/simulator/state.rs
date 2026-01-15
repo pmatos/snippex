@@ -124,10 +124,13 @@ impl FinalState {
         }
 
         // Parse memory locations (starting at offset 256)
-        // Memory locations are stored as address:size:data triplets
+        // The epilogue stores stack values as (value, size=8) pairs, not full memory regions.
+        // We parse these as stack slot values for debugging purposes.
+        // Format: [value: u64, size: u64] pairs ending with (0, 0) marker.
         let mut offset = MEMORY_SECTION_OFFSET;
+        let mut stack_slot = 0u64;
         while offset + 16 <= output.len() {
-            let address = u64::from_le_bytes([
+            let value = u64::from_le_bytes([
                 output[offset],
                 output[offset + 1],
                 output[offset + 2],
@@ -149,30 +152,24 @@ impl FinalState {
                 output[offset + 15],
             ]);
 
-            if address == 0 && size == 0 {
+            if value == 0 && size == 0 {
                 break; // End marker
             }
 
-            offset += 16;
-
-            // Validate size to prevent buffer overflow
-            if size > (output.len() - offset) as u64 {
-                return Err(Error::Simulation(format!(
-                    "Memory data size {} exceeds remaining buffer size {}",
-                    size,
-                    output.len() - offset
-                )));
-            }
-
-            if offset + size as usize <= output.len() {
-                // Use with_capacity to optimize memory allocations
-                let mut data = Vec::with_capacity(size as usize);
-                data.extend_from_slice(&output[offset..offset + size as usize]);
-                state.memory_locations.insert(address, data);
-                offset += size as usize;
-            } else {
+            // The epilogue stores stack values with size=8. If we see a different size,
+            // stop parsing as the memory section may be corrupted or in an unexpected format.
+            if size != 8 {
                 break;
             }
+
+            // Store stack values using pseudo-addresses (stack slot index)
+            let pseudo_addr = 0xFFFF_FFFF_0000_0000 + stack_slot;
+            state
+                .memory_locations
+                .insert(pseudo_addr, value.to_le_bytes().to_vec());
+            stack_slot += 1;
+
+            offset += 16;
         }
 
         Ok(state)

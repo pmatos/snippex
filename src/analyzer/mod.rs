@@ -2,7 +2,22 @@ use anyhow::{anyhow, Result};
 use capstone::prelude::*;
 use capstone::{Capstone, Insn, InsnGroupId};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+
+/// Information about how a register is used as a memory pointer
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PointerRegisterUsage {
+    /// Minimum offset used (can be negative, e.g., [rbp-0x20] → -32)
+    pub min_offset: i64,
+    /// Maximum offset used (e.g., [rsi+100] → 100)
+    pub max_offset: i64,
+    /// Maximum size of data accessed at any offset
+    pub max_access_size: usize,
+    /// Whether any instruction reads through this pointer
+    pub has_reads: bool,
+    /// Whether any instruction writes through this pointer
+    pub has_writes: bool,
+}
 
 #[derive(Debug, Clone)]
 pub struct BlockAnalysis {
@@ -11,6 +26,8 @@ pub struct BlockAnalysis {
     pub exit_points: Vec<ExitPoint>,
     pub memory_accesses: Vec<MemoryAccess>,
     pub instructions_count: usize,
+    /// Registers used as memory pointers, with their usage patterns
+    pub pointer_registers: HashMap<String, PointerRegisterUsage>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,6 +86,7 @@ impl Analyzer {
             exit_points: Vec::new(),
             memory_accesses: Vec::new(),
             instructions_count: insns.len(),
+            pointer_registers: HashMap::new(),
         };
 
         let mut read_regs = HashSet::new();
@@ -91,9 +109,13 @@ impl Analyzer {
                 analysis.exit_points.push(exit);
             }
 
-            // Analyze memory accesses
+            // Analyze memory accesses and pointer registers
             if let Some(mem_access) = self.analyze_memory_access(&cs, insn)? {
-                analysis.memory_accesses.push(mem_access);
+                analysis.memory_accesses.push(mem_access.clone());
+
+                // Also detect pointer register usage from memory operands
+                let op_str = insn.op_str().unwrap_or("");
+                self.detect_pointer_registers(op_str, &mem_access, &mut analysis.pointer_registers);
             }
         }
 
@@ -466,13 +488,24 @@ impl Analyzer {
             _ => AccessType::ReadWrite,                           // conservative default
         };
 
-        // Estimate size based on instruction suffix or default
-        let size = match mnemonic.chars().last() {
-            Some('b') => 1,
-            Some('w') => 2,
-            Some('d') => 4,
-            Some('q') => 8,
-            _ => 4, // default to 32-bit
+        // Estimate size based on operand prefix or instruction suffix
+        let size = if op_str.contains("qword") {
+            8
+        } else if op_str.contains("dword") {
+            4
+        } else if op_str.contains("word") && !op_str.contains("dword") && !op_str.contains("qword")
+        {
+            2
+        } else if op_str.contains("byte") {
+            1
+        } else {
+            match mnemonic.chars().last() {
+                Some('b') => 1,
+                Some('w') => 2,
+                Some('d') => 4,
+                Some('q') => 8,
+                _ => 4, // default to 32-bit
+            }
         };
 
         Ok(Some(MemoryAccess {
@@ -481,5 +514,168 @@ impl Analyzer {
             size,
             is_stack,
         }))
+    }
+
+    /// Detect which registers are used as memory pointers and track their offset ranges
+    fn detect_pointer_registers(
+        &self,
+        op_str: &str,
+        mem_access: &MemoryAccess,
+        pointer_regs: &mut HashMap<String, PointerRegisterUsage>,
+    ) {
+        // Parse all memory operands in the instruction
+        for (base_reg, offset) in self.parse_memory_operands(op_str) {
+            let usage = pointer_regs.entry(base_reg).or_default();
+
+            // Update offset range
+            usage.min_offset = usage.min_offset.min(offset);
+            usage.max_offset = usage.max_offset.max(offset);
+
+            // Update access size
+            usage.max_access_size = usage.max_access_size.max(mem_access.size);
+
+            // Update read/write flags
+            match mem_access.access_type {
+                AccessType::Read => usage.has_reads = true,
+                AccessType::Write => usage.has_writes = true,
+                AccessType::ReadWrite => {
+                    usage.has_reads = true;
+                    usage.has_writes = true;
+                }
+            }
+        }
+    }
+
+    /// Parse memory operands and extract base registers with their offsets
+    /// Examples:
+    ///   "[rsi+8]" → [("rsi", 8)]
+    ///   "[rbp-0x20]" → [("rbp", -32)]
+    ///   "[rdi]" → [("rdi", 0)]
+    ///   "[rax+rcx*4+8]" → [("rax", 8)] (ignore scaled index for static analysis)
+    fn parse_memory_operands(&self, op_str: &str) -> Vec<(String, i64)> {
+        let mut results = Vec::new();
+
+        // Find all memory operands (content within [])
+        let mut chars = op_str.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '[' {
+                let mut mem_operand = String::new();
+                let mut depth = 1;
+                while let Some(&next) = chars.peek() {
+                    chars.next();
+                    if next == '[' {
+                        depth += 1;
+                    } else if next == ']' {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    mem_operand.push(next);
+                }
+
+                // Parse the memory operand content
+                if let Some((reg, offset)) = self.parse_single_memory_operand(&mem_operand) {
+                    results.push((reg, offset));
+                }
+            }
+        }
+
+        results
+    }
+
+    /// Parse a single memory operand (content inside [])
+    fn parse_single_memory_operand(&self, operand: &str) -> Option<(String, i64)> {
+        let operand = operand.to_lowercase().trim().to_string();
+
+        // Skip RIP-relative addressing (handled differently)
+        if operand.contains("rip") || operand.contains("eip") {
+            return None;
+        }
+
+        // Find the base register (first register that isn't part of scaled index)
+        let reg_patterns = [
+            "r15", "r14", "r13", "r12", "r11", "r10", "r9", "r8", "rsp", "rbp", "rdi", "rsi",
+            "rdx", "rcx", "rbx", "rax", "esp", "ebp", "edi", "esi", "edx", "ecx", "ebx", "eax",
+        ];
+
+        let mut base_reg: Option<String> = None;
+        let mut base_reg_pos: Option<usize> = None;
+
+        for &reg in &reg_patterns {
+            if let Some(pos) = operand.find(reg) {
+                // Check if this register is part of a scaled index (has *N after it)
+                let after_reg = &operand[pos + reg.len()..];
+                let is_scaled = after_reg.trim_start().starts_with('*');
+
+                if !is_scaled {
+                    // This is likely the base register
+                    if base_reg.is_none() || pos < base_reg_pos.unwrap() {
+                        base_reg = Some(self.normalize_register_to_64bit(reg));
+                        base_reg_pos = Some(pos);
+                    }
+                }
+            }
+        }
+
+        let base_reg = base_reg?;
+
+        // Extract the constant offset
+        let offset = self.extract_offset(&operand);
+
+        Some((base_reg, offset))
+    }
+
+    /// Extract the constant offset from a memory operand
+    fn extract_offset(&self, operand: &str) -> i64 {
+        let mut offset: i64 = 0;
+
+        // Look for patterns like +0x20, -0x20, +20, -20
+        let mut chars = operand.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '+' || c == '-' {
+                let is_negative = c == '-';
+
+                // Skip whitespace
+                while chars.peek() == Some(&' ') {
+                    chars.next();
+                }
+
+                // Check if next part is a register (then skip) or a number
+                let mut num_str = String::new();
+                let is_hex = chars.peek() == Some(&'0') && {
+                    let mut temp = chars.clone();
+                    temp.next();
+                    temp.peek() == Some(&'x') || temp.peek() == Some(&'X')
+                };
+
+                if is_hex {
+                    chars.next(); // skip '0'
+                    chars.next(); // skip 'x'
+                }
+
+                while let Some(&next) = chars.peek() {
+                    if next.is_ascii_hexdigit() && (is_hex || next.is_ascii_digit()) {
+                        num_str.push(next);
+                        chars.next();
+                    } else if next == '*' || next.is_alphabetic() {
+                        // This is a register or scaled index, not a constant
+                        num_str.clear();
+                        break;
+                    } else {
+                        break;
+                    }
+                }
+
+                if !num_str.is_empty() {
+                    let base = if is_hex { 16 } else { 10 };
+                    if let Ok(val) = i64::from_str_radix(&num_str, base) {
+                        offset = if is_negative { -val } else { val };
+                    }
+                }
+            }
+        }
+
+        offset
     }
 }

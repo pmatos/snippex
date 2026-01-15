@@ -193,6 +193,7 @@ pub struct SandboxMemoryLayout {
 /// Each section maintains both its original address (from the binary) and its
 /// translated sandbox address, along with the section's metadata and optional data.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct SectionMapping {
     /// Metadata about the section (name, size, permissions, alignment)
     pub section_metadata: SectionMetadata,
@@ -350,6 +351,7 @@ impl SandboxMemoryLayout {
     }
 
     /// Returns the sandbox base address (always SANDBOX_BASE = 0x10000000).
+    #[allow(dead_code)]
     pub fn sandbox_base(&self) -> u64 {
         self.sandbox_base
     }
@@ -358,6 +360,7 @@ impl SandboxMemoryLayout {
     ///
     /// This is the address where the binary is loaded in its original address space,
     /// typically obtained from the first LOAD segment in ELF headers.
+    #[allow(dead_code)]
     pub fn binary_base(&self) -> u64 {
         self.binary_base
     }
@@ -366,6 +369,7 @@ impl SandboxMemoryLayout {
     ///
     /// Each mapping contains both the original address and translated sandbox address,
     /// along with the section metadata and optional data.
+    #[allow(dead_code)]
     pub fn sections(&self) -> &[SectionMapping] {
         &self.sections
     }
@@ -383,6 +387,7 @@ impl SandboxMemoryLayout {
     ///
     /// `Some(&SectionMapping)` if the address falls within a mapped section,
     /// `None` if no section contains this address
+    #[allow(dead_code)]
     pub fn find_section_by_address(&self, original_addr: u64) -> Option<&SectionMapping> {
         self.sections.iter().find(|section| {
             let section_start = section.original_address;
@@ -401,6 +406,7 @@ impl SandboxMemoryLayout {
     ///
     /// `Some(&SectionMapping)` if a section with this name exists,
     /// `None` if no such section has been added
+    #[allow(dead_code)]
     pub fn get_section_by_name(&self, name: &str) -> Option<&SectionMapping> {
         self.sections
             .iter()
@@ -430,6 +436,7 @@ impl SandboxMemoryLayout {
     /// let memory = sandbox.allocate_memory_region()?;
     /// // Use memory map for simulator memory setup
     /// ```
+    #[allow(dead_code)]
     pub fn allocate_memory_region(&self) -> Result<HashMap<u64, Vec<u8>>> {
         let mut memory = HashMap::new();
 
@@ -584,7 +591,9 @@ mod tests {
             is_readable: true,
         };
         let text_data = vec![0x90; 0x10];
-        layout.add_section(text_metadata, Some(text_data.clone())).unwrap();
+        layout
+            .add_section(text_metadata, Some(text_data.clone()))
+            .unwrap();
 
         // Add .bss section (no data, should be zero-initialized)
         let bss_metadata = SectionMetadata {
@@ -608,6 +617,10 @@ mod tests {
 
         let bss_sandbox_addr = layout.translate_to_sandbox(binary_base + 0x3000).unwrap();
         assert_eq!(memory.get(&bss_sandbox_addr).unwrap().len(), 0x100);
-        assert!(memory.get(&bss_sandbox_addr).unwrap().iter().all(|&b| b == 0));
+        assert!(memory
+            .get(&bss_sandbox_addr)
+            .unwrap()
+            .iter()
+            .all(|&b| b == 0));
     }
 }

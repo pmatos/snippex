@@ -282,6 +282,7 @@ impl ImportResultsCommand {
                 live_out_registers: analysis.live_out_registers.iter().cloned().collect(),
                 exit_points,
                 memory_accesses,
+                pointer_registers: std::collections::HashMap::new(),
             };
 
             // Note: For now, we skip storing analysis as it requires complex mapping

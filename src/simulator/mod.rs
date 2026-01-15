@@ -21,6 +21,7 @@ pub use compilation::CompilationPipeline;
 pub use emulator::EmulatorConfig;
 pub use execution::ExecutionHarness;
 pub use random_generator::RandomStateGenerator;
+#[allow(unused_imports)]
 pub use sandbox::{SandboxMemoryLayout, SectionMapping, SANDBOX_BASE, SANDBOX_SIZE};
 pub use state::{FinalState, InitialState};
 
@@ -128,7 +129,10 @@ impl Simulator {
         // DEBUG: Save assembly to /tmp for inspection
         let debug_asm_path = format!("/tmp/debug_simulation_{}.asm", Uuid::new_v4());
         if let Err(e) = std::fs::write(&debug_asm_path, &assembly_source) {
-            eprintln!("Warning: Could not save debug assembly to {}: {}", debug_asm_path, e);
+            eprintln!(
+                "Warning: Could not save debug assembly to {}: {}",
+                debug_asm_path, e
+            );
         } else {
             eprintln!("DEBUG: Assembly saved to {}", debug_asm_path);
         }

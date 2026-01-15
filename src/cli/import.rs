@@ -297,9 +297,10 @@ impl ImportCommand {
         })?;
 
         // Remove the exit syscall we added (last few bytes)
-        // x86_64: mov rax,60; mov rdi,0; syscall = ~15 bytes
-        // i386: mov eax,1; mov ebx,0; int 0x80 = ~10 bytes
-        let syscall_size = 15; // Conservative estimate
+        // x86_64: mov eax,60 (5) + mov edi,0 (5) + syscall (2) = 12 bytes
+        //         (NASM optimizes to 32-bit mov when the value fits)
+        // i386: mov eax,1 (5) + mov ebx,0 (5) + int 0x80 (2) = 12 bytes
+        let syscall_size = 12;
         let end_pos = section_data.len().saturating_sub(syscall_size).max(1);
 
         Ok(section_data[..end_pos].to_vec())
@@ -318,8 +319,8 @@ impl ImportCommand {
             format: "NASM-Import".to_string(),
             architecture: architecture.to_string(),
             endianness: "little".to_string(), // x86/x86_64 are little endian
-            base_address: 0x400000, // Default base address for imported NASM files
-            entry_point: 0x400000, // Default entry point for imported NASM files
+            base_address: 0x400000,           // Default base address for imported NASM files
+            entry_point: 0x400000,            // Default entry point for imported NASM files
         })
     }
 }

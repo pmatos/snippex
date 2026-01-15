@@ -85,11 +85,18 @@ impl Database {
                 live_out_registers TEXT NOT NULL,
                 exit_points TEXT NOT NULL,
                 memory_accesses TEXT NOT NULL,
+                pointer_registers TEXT DEFAULT '{}',
                 analyzed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (extraction_id) REFERENCES extractions(id)
             )",
             [],
         )?;
+
+        // Migration: Add pointer_registers column if it doesn't exist (for existing databases)
+        let _ = self.conn.execute(
+            "ALTER TABLE analyses ADD COLUMN pointer_registers TEXT DEFAULT '{}'",
+            [],
+        );
 
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS simulations (
@@ -358,13 +365,14 @@ impl Database {
             .collect();
         let exit_points_json = serde_json::to_string(&analysis.exit_points)?;
         let memory_accesses_json = serde_json::to_string(&analysis.memory_accesses)?;
+        let pointer_registers_json = serde_json::to_string(&analysis.pointer_registers)?;
 
         // Insert or update analysis
         tx.execute(
             "INSERT OR REPLACE INTO analyses
              (extraction_id, instructions_count, live_in_registers, live_out_registers,
-              exit_points, memory_accesses)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+              exit_points, memory_accesses, pointer_registers)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 extraction_id,
                 analysis.instructions_count as i64,
@@ -372,6 +380,7 @@ impl Database {
                 live_out_regs.join(","),
                 exit_points_json,
                 memory_accesses_json,
+                pointer_registers_json,
             ],
         )?;
 
@@ -434,8 +443,8 @@ impl Database {
         extraction_id: i64,
     ) -> Result<Option<crate::analyzer::BlockAnalysis>> {
         let mut stmt = self.conn.prepare(
-            "SELECT instructions_count, live_in_registers, live_out_registers, 
-                    exit_points, memory_accesses
+            "SELECT instructions_count, live_in_registers, live_out_registers,
+                    exit_points, memory_accesses, COALESCE(pointer_registers, '{}')
              FROM analyses WHERE extraction_id = ?1",
         )?;
 
@@ -445,6 +454,7 @@ impl Database {
             let live_out_str: String = row.get(2)?;
             let exit_points_json: String = row.get(3)?;
             let memory_accesses_json: String = row.get(4)?;
+            let pointer_registers_json: String = row.get(5)?;
 
             Ok((
                 instructions_count,
@@ -452,6 +462,7 @@ impl Database {
                 live_out_str,
                 exit_points_json,
                 memory_accesses_json,
+                pointer_registers_json,
             ))
         });
 
@@ -462,6 +473,7 @@ impl Database {
                 live_out_str,
                 exit_points_json,
                 memory_accesses_json,
+                pointer_registers_json,
             )) => {
                 let live_in_registers = live_in_str
                     .split(',')
@@ -481,12 +493,16 @@ impl Database {
                 let memory_accesses = serde_json::from_str(&memory_accesses_json)
                     .map_err(|e| anyhow::anyhow!("Failed to parse memory accesses: {}", e))?;
 
+                let pointer_registers =
+                    serde_json::from_str(&pointer_registers_json).unwrap_or_default();
+
                 Ok(Some(crate::analyzer::BlockAnalysis {
                     instructions_count: instructions_count as usize,
                     live_in_registers,
                     live_out_registers,
                     exit_points,
                     memory_accesses,
+                    pointer_registers,
                 }))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),

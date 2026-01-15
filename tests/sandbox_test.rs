@@ -64,7 +64,10 @@ fn test_section_loading() {
     if let Ok((rodata_metadata, rodata_data)) = rodata_result {
         assert_eq!(rodata_metadata.name, ".rodata");
         assert!(rodata_metadata.is_readable, ".rodata should be readable");
-        assert!(!rodata_metadata.is_writable, ".rodata should not be writable");
+        assert!(
+            !rodata_metadata.is_writable,
+            ".rodata should not be writable"
+        );
         assert!(!rodata_data.is_empty(), ".rodata section should have data");
     }
 }
@@ -121,7 +124,9 @@ fn test_sandbox_with_real_binary_sections() {
 
     // Load .text section into sandbox
     if let Ok((text_metadata, text_data)) = loader.extract_text_section() {
-        sandbox.add_section(text_metadata.clone(), Some(text_data.clone())).expect("Failed to add .text");
+        sandbox
+            .add_section(text_metadata.clone(), Some(text_data.clone()))
+            .expect("Failed to add .text");
 
         // Verify the section was added
         let found = sandbox.get_section_by_name(".text");
@@ -132,7 +137,9 @@ fn test_sandbox_with_real_binary_sections() {
         assert_eq!(section.original_address, text_metadata.virtual_address);
 
         // Verify address translation
-        let sandbox_addr = sandbox.translate_to_sandbox(text_metadata.virtual_address).unwrap();
+        let sandbox_addr = sandbox
+            .translate_to_sandbox(text_metadata.virtual_address)
+            .unwrap();
         assert_eq!(sandbox_addr, section.sandbox_address);
     }
 }
@@ -160,16 +167,22 @@ fn test_memory_region_allocation() {
 
     // Add .text section
     if let Ok((text_metadata, text_data)) = loader.extract_text_section() {
-        sandbox.add_section(text_metadata, Some(text_data)).expect("Failed to add .text");
+        sandbox
+            .add_section(text_metadata, Some(text_data))
+            .expect("Failed to add .text");
     }
 
     // Add .rodata section if it exists
     if let Ok((rodata_metadata, rodata_data)) = loader.extract_rodata_section() {
-        sandbox.add_section(rodata_metadata, Some(rodata_data)).expect("Failed to add .rodata");
+        sandbox
+            .add_section(rodata_metadata, Some(rodata_data))
+            .expect("Failed to add .rodata");
     }
 
     // Allocate memory region
-    let memory = sandbox.allocate_memory_region().expect("Failed to allocate memory");
+    let memory = sandbox
+        .allocate_memory_region()
+        .expect("Failed to allocate memory");
 
     // Verify memory was allocated
     assert!(!memory.is_empty(), "Memory should be allocated");
@@ -232,7 +245,9 @@ fn test_data_section_access() {
     };
 
     let data_bytes = vec![0x42; 0x100];
-    sandbox.add_section(data_metadata, Some(data_bytes.clone())).expect("Failed to add .data");
+    sandbox
+        .add_section(data_metadata, Some(data_bytes.clone()))
+        .expect("Failed to add .data");
 
     // Access address in .data section
     let data_addr = binary_base + 0x3000 + 0x50;
@@ -270,7 +285,9 @@ fn test_rodata_string_reference() {
     let hello_world = b"Hello, World!\0";
     rodata_bytes[0..hello_world.len()].copy_from_slice(hello_world);
 
-    sandbox.add_section(rodata_metadata, Some(rodata_bytes.clone())).expect("Failed to add .rodata");
+    sandbox
+        .add_section(rodata_metadata, Some(rodata_bytes.clone()))
+        .expect("Failed to add .rodata");
 
     // Access string address
     let string_addr = binary_base + 0x2000;
@@ -280,7 +297,9 @@ fn test_rodata_string_reference() {
     assert_eq!(translated, SANDBOX_BASE + 0x2000);
 
     // Allocate memory and verify string is present
-    let memory = sandbox.allocate_memory_region().expect("Failed to allocate memory");
+    let memory = sandbox
+        .allocate_memory_region()
+        .expect("Failed to allocate memory");
     let allocated_data = memory.get(&translated).expect("String should be in memory");
     assert_eq!(&allocated_data[0..hello_world.len()], hello_world);
 }

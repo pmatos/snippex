@@ -6,6 +6,10 @@ use crate::error::{Error, Result};
 
 const OUTPUT_BUFFER_SIZE: usize = 4096;
 
+/// Pointer buffer region within the sandbox (must match random_generator.rs)
+const POINTER_BUFFER_BASE: u64 = super::sandbox::SANDBOX_BASE + 0x0800_0000;
+const POINTER_BUFFER_END: u64 = super::sandbox::SANDBOX_BASE + super::sandbox::SANDBOX_SIZE;
+
 pub struct AssemblyGenerator {
     #[allow(dead_code)]
     pub target_arch: String,
@@ -70,10 +74,20 @@ impl AssemblyGenerator {
         Ok(assembly)
     }
 
-    fn generate_preamble(&self, initial_state: &InitialState, sandbox: Option<&SandboxMemoryLayout>) -> Result<String> {
+    fn generate_preamble(
+        &self,
+        initial_state: &InitialState,
+        sandbox: Option<&SandboxMemoryLayout>,
+    ) -> Result<String> {
         let mut preamble = String::new();
 
         preamble.push_str("    ; === PREAMBLE: Set up initial state ===\n");
+
+        // First, map memory regions for pointer buffers
+        let mmap_code = self.generate_mmap_for_pointer_buffers(initial_state);
+        if !mmap_code.is_empty() {
+            preamble.push_str(&mmap_code);
+        }
 
         // Set up registers
         for (reg, value) in &initial_state.registers {
@@ -88,23 +102,24 @@ impl AssemblyGenerator {
 
         // Set up memory locations with address translation
         for (addr, data) in &initial_state.memory_locations {
-            // Translate address if sandbox is available
-            let target_addr = if let Some(sandbox) = sandbox {
+            // Check if address is already in sandbox range (e.g., pointer buffers)
+            // These addresses don't need translation - they're already valid
+            use super::sandbox::{SANDBOX_BASE, SANDBOX_SIZE};
+            let target_addr = if *addr >= SANDBOX_BASE && *addr < SANDBOX_BASE + SANDBOX_SIZE {
+                // Address is already in sandbox range (e.g., pointer register buffers)
+                *addr
+            } else if let Some(sandbox) = sandbox {
+                // Translate original binary address to sandbox address
                 match sandbox.translate_to_sandbox(*addr) {
-                    Ok(translated) => {
-                        // Successfully translated to sandbox address
-                        translated
-                    }
+                    Ok(translated) => translated,
                     Err(_) => {
                         // Skip addresses that can't be translated - they're likely outside
                         // the loaded binary sections (e.g., stack, heap, or invalid addresses)
-                        // These will cause NASM errors if we try to use them
                         continue;
                     }
                 }
             } else {
-                // No sandbox - skip memory initialization to avoid address space issues
-                // Without sandbox, we can't safely initialize memory at arbitrary addresses
+                // No sandbox and address not in sandbox range - skip
                 continue;
             };
 
@@ -145,6 +160,65 @@ impl AssemblyGenerator {
         Ok(preamble)
     }
 
+    /// Generates mmap syscalls to map memory regions for pointer buffers.
+    ///
+    /// Scans initial_state.memory_locations for addresses in the pointer buffer range
+    /// and generates mmap syscalls to allocate those memory regions before use.
+    fn generate_mmap_for_pointer_buffers(&self, initial_state: &InitialState) -> String {
+        let mut mmap_code = String::new();
+
+        // Find all addresses in the pointer buffer range
+        let mut min_addr: Option<u64> = None;
+        let mut max_addr: Option<u64> = None;
+
+        for (addr, data) in &initial_state.memory_locations {
+            if *addr >= POINTER_BUFFER_BASE && *addr < POINTER_BUFFER_END {
+                let end_addr = addr + data.len() as u64;
+
+                match min_addr {
+                    Some(m) if *addr < m => min_addr = Some(*addr),
+                    None => min_addr = Some(*addr),
+                    _ => {}
+                }
+
+                match max_addr {
+                    Some(m) if end_addr > m => max_addr = Some(end_addr),
+                    None => max_addr = Some(end_addr),
+                    _ => {}
+                }
+            }
+        }
+
+        // If we have addresses to map, generate mmap syscall
+        if let (Some(start), Some(end)) = (min_addr, max_addr) {
+            // Page-align the addresses
+            let page_size: u64 = 0x1000;
+            let aligned_start = (start / page_size) * page_size;
+            let aligned_end = end.div_ceil(page_size) * page_size;
+            let length = aligned_end - aligned_start;
+
+            mmap_code.push_str("    ; Map pointer buffer memory region\n");
+            mmap_code.push_str("    mov rax, 9                    ; sys_mmap\n");
+            mmap_code.push_str(&format!("    mov rdi, 0x{aligned_start:016x} ; addr\n"));
+            mmap_code.push_str(&format!(
+                "    mov rsi, 0x{length:x}              ; length\n"
+            ));
+            mmap_code.push_str("    mov rdx, 3                    ; PROT_READ | PROT_WRITE\n");
+            mmap_code.push_str(
+                "    mov r10, 0x32                 ; MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED\n",
+            );
+            mmap_code.push_str(
+                "    xor r8, r8                    ; fd = 0 (will be ignored for anonymous)\n",
+            );
+            mmap_code.push_str("    sub r8, 1                     ; fd = -1\n");
+            mmap_code.push_str("    xor r9, r9                    ; offset = 0\n");
+            mmap_code.push_str("    syscall\n");
+            mmap_code.push('\n');
+        }
+
+        mmap_code
+    }
+
     fn generate_block_code(&self, extraction: &ExtractionInfo) -> Result<String> {
         let mut block_code = String::new();
 
@@ -155,14 +229,15 @@ impl AssemblyGenerator {
         // Emit the block bytes in chunks of 16 for readability
         for (i, chunk) in extraction.assembly_block.chunks(16).enumerate() {
             block_code.push_str("    db ");
-            let hex_bytes: Vec<String> = chunk.iter()
-                .map(|b| format!("0x{:02x}", b))
-                .collect();
+            let hex_bytes: Vec<String> = chunk.iter().map(|b| format!("0x{:02x}", b)).collect();
             block_code.push_str(&hex_bytes.join(", "));
 
             // Add comment with offset for debugging
             if i == 0 {
-                block_code.push_str(&format!("  ; Block bytes ({} total)", extraction.assembly_block.len()));
+                block_code.push_str(&format!(
+                    "  ; Block bytes ({} total)",
+                    extraction.assembly_block.len()
+                ));
             }
             block_code.push('\n');
         }
@@ -172,6 +247,7 @@ impl AssemblyGenerator {
         Ok(block_code)
     }
 
+    #[allow(dead_code)]
     fn disassemble_block(&self, block: &[u8]) -> Result<Vec<String>> {
         use capstone::prelude::*;
 
@@ -270,6 +346,7 @@ impl AssemblyGenerator {
         Ok(epilogue)
     }
 
+    #[allow(dead_code)]
     fn convert_to_nasm_syntax(&self, instruction: &str) -> String {
         // Convert Intel syntax to NASM syntax with improved robustness
         let mut result = instruction.to_string();
