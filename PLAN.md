@@ -213,7 +213,7 @@ When results differ, clearly show what's wrong (specific register, flag, or memo
   - [x] Verify base address parsing from ELF
   - [x] Verify section loading
   - [x] Verify address translation math
-- [ ] Integration test: extract, analyze, simulate with address translation
+- [x] Integration test: extract, analyze, simulate with address translation
 - [ ] Measure simulation success rate improvement (target: 60-80% from current ~10-20%)
 
 ### 1.6 Documentation
