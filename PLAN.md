@@ -205,14 +205,14 @@ When results differ, clearly show what's wrong (specific register, flag, or memo
 
 ### 1.5 Testing & Validation
 
-- [ ] Create test cases with known memory references:
-  - [ ] Simple block with `.data` access
-  - [ ] Block with `.rodata` string reference
-  - [ ] Block with RIP-relative addressing
-- [ ] Test address translation correctness:
-  - [ ] Verify base address parsing from ELF
-  - [ ] Verify section loading
-  - [ ] Verify address translation math
+- [x] Create test cases with known memory references:
+  - [x] Simple block with `.data` access
+  - [x] Block with `.rodata` string reference
+  - [x] Block with RIP-relative addressing
+- [x] Test address translation correctness:
+  - [x] Verify base address parsing from ELF
+  - [x] Verify section loading
+  - [x] Verify address translation math
 - [ ] Integration test: extract, analyze, simulate with address translation
 - [ ] Measure simulation success rate improvement (target: 60-80% from current ~10-20%)
 
