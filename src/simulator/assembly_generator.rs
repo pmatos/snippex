@@ -91,15 +91,21 @@ impl AssemblyGenerator {
             // Translate address if sandbox is available
             let target_addr = if let Some(sandbox) = sandbox {
                 match sandbox.translate_to_sandbox(*addr) {
-                    Ok(translated) => translated,
+                    Ok(translated) => {
+                        // Successfully translated to sandbox address
+                        translated
+                    }
                     Err(_) => {
-                        // If translation fails, use the original address
-                        // This maintains backward compatibility for non-sandboxed simulation
-                        *addr
+                        // Skip addresses that can't be translated - they're likely outside
+                        // the loaded binary sections (e.g., stack, heap, or invalid addresses)
+                        // These will cause NASM errors if we try to use them
+                        continue;
                     }
                 }
             } else {
-                *addr
+                // No sandbox - skip memory initialization to avoid address space issues
+                // Without sandbox, we can't safely initialize memory at arbitrary addresses
+                continue;
             };
 
             match data.len() {
@@ -142,13 +148,23 @@ impl AssemblyGenerator {
     fn generate_block_code(&self, extraction: &ExtractionInfo) -> Result<String> {
         let mut block_code = String::new();
 
-        // Disassemble the block to generate assembly code
-        let disassembled = self.disassemble_block(&extraction.assembly_block)?;
+        // Embed the block as raw bytes instead of disassembling
+        // This preserves RIP-relative instructions and avoids NASM symbol errors
+        block_code.push_str("block_start:\n");
 
-        for instruction in disassembled {
-            // Convert Intel syntax to NASM syntax
-            let nasm_instruction = self.convert_to_nasm_syntax(&instruction);
-            block_code.push_str(&format!("    {nasm_instruction}\n"));
+        // Emit the block bytes in chunks of 16 for readability
+        for (i, chunk) in extraction.assembly_block.chunks(16).enumerate() {
+            block_code.push_str("    db ");
+            let hex_bytes: Vec<String> = chunk.iter()
+                .map(|b| format!("0x{:02x}", b))
+                .collect();
+            block_code.push_str(&hex_bytes.join(", "));
+
+            // Add comment with offset for debugging
+            if i == 0 {
+                block_code.push_str(&format!("  ; Block bytes ({} total)", extraction.assembly_block.len()));
+            }
+            block_code.push('\n');
         }
 
         block_code.push('\n');
