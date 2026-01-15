@@ -11,6 +11,8 @@ use crate::error::SnippexError;
 
 const MIN_BLOCK_SIZE: usize = 16;
 
+pub mod section_loader;
+
 #[cfg(test)]
 mod tests;
 

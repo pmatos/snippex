@@ -168,14 +168,14 @@ When results differ, clearly show what's wrong (specific register, flag, or memo
 
 ### 1.2 Binary Section Loading
 
-- [ ] Implement `BinarySectionLoader` to extract sections from ELF files:
-  - [ ] `.text` section (executable code)
-  - [ ] `.data` section (initialized data)
-  - [ ] `.rodata` section (read-only data)
-  - [ ] `.bss` section (uninitialized data)
-- [ ] Store section metadata: offset, size, virtual address, permissions
-- [ ] Add helper to load section bytes from original binary file
-- [ ] Handle section alignment requirements
+- [x] Implement `BinarySectionLoader` to extract sections from ELF files:
+  - [x] `.text` section (executable code)
+  - [x] `.data` section (initialized data)
+  - [x] `.rodata` section (read-only data)
+  - [x] `.bss` section (uninitialized data)
+- [x] Store section metadata: offset, size, virtual address, permissions
+- [x] Add helper to load section bytes from original binary file
+- [x] Handle section alignment requirements
 
 ### 1.3 Sandbox Memory Manager
 
