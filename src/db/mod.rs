@@ -27,6 +27,7 @@ pub struct ExtractionInfo {
     pub binary_hash: String,
     pub binary_format: String,
     pub binary_architecture: String,
+    pub binary_base_address: u64,
     pub start_address: u64,
     pub end_address: u64,
     pub assembly_block: Vec<u8>,
@@ -218,15 +219,15 @@ impl Database {
 
     pub fn list_extractions(&self) -> Result<Vec<ExtractionInfo>> {
         let mut stmt = self.conn.prepare(
-            "SELECT b.path, b.hash, b.format, b.architecture, 
+            "SELECT b.path, b.hash, b.format, b.architecture, b.base_address,
                     e.start_address, e.end_address, e.assembly_block, e.created_at,
                     e.id,
-                    CASE 
+                    CASE
                         WHEN a.id IS NOT NULL THEN 'analyzed'
                         ELSE 'not analyzed'
                     END as analysis_status,
-                    CASE 
-                        WHEN a.id IS NOT NULL THEN 
+                    CASE
+                        WHEN a.id IS NOT NULL THEN
                             json_object(
                                 'instructions', a.instructions_count,
                                 'live_in', a.live_in_registers,
@@ -243,17 +244,18 @@ impl Database {
         let extractions = stmt
             .query_map([], |row| {
                 Ok(ExtractionInfo {
-                    id: row.get(8)?,
+                    id: row.get(9)?,
                     binary_path: row.get(0)?,
                     binary_hash: row.get(1)?,
                     binary_format: row.get(2)?,
                     binary_architecture: row.get(3)?,
-                    start_address: row.get::<_, i64>(4)? as u64,
-                    end_address: row.get::<_, i64>(5)? as u64,
-                    assembly_block: row.get(6)?,
-                    created_at: row.get(7)?,
-                    analysis_status: row.get(9)?,
-                    analysis_results: row.get(10)?,
+                    binary_base_address: row.get::<_, i64>(4)? as u64,
+                    start_address: row.get::<_, i64>(5)? as u64,
+                    end_address: row.get::<_, i64>(6)? as u64,
+                    assembly_block: row.get(7)?,
+                    created_at: row.get(8)?,
+                    analysis_status: row.get(10)?,
+                    analysis_results: row.get(11)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

@@ -12,6 +12,7 @@ mod tests {
             binary_hash: "abcdef123456".to_string(),
             binary_format: "ELF".to_string(),
             binary_architecture: "x86_64".to_string(),
+            binary_base_address: 0x400000, // Non-PIE binary base
             start_address: 0x1000,
             end_address: 0x1008,
             assembly_block: vec![

@@ -218,10 +218,10 @@ When results differ, clearly show what's wrong (specific register, flag, or memo
 
 ### 1.6 Documentation
 
-- [ ] Document address translation algorithm in code comments
+- [x] Document address translation algorithm in code comments
 - [ ] Update README.md with improved simulation success rates
 - [ ] Add troubleshooting guide for simulation failures
-- [ ] Document limitations (e.g., syscalls still won't work)
+- [x] Document limitations (e.g., syscalls still won't work)
 
 ---
 
