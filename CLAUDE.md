@@ -2,6 +2,54 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Project Goal: FEX-Emu Bug Detection
+
+Snippex is designed to find bugs in FEX-Emu, an x86-on-ARM64 dynamic binary translator/emulator.
+
+### Testing Workflow
+
+The testing methodology requires **native x86 execution as ground truth**:
+
+1. **x86 Machine** (or cloud VM with x86/x86_64 CPU):
+   - Extract x86/x86_64 assembly blocks from binaries
+   - Analyze blocks for register/memory usage patterns
+   - Simulate blocks natively to obtain ground truth results
+   - Export simulation results to JSON for transfer
+
+2. **ARM64 Machine** (FEX-Emu testing environment):
+   - Import native simulation results (ground truth)
+   - Simulate same blocks through FEX-Emu
+   - Compare FEX-Emu results against native ground truth
+   - Discrepancies indicate potential FEX-Emu bugs
+
+### Why Native Execution is Essential
+
+Native x86 execution provides definitive ground truth for correctness. Alternative approaches are problematic:
+
+**❌ Emulator-vs-Emulator Testing (e.g., Unicorn vs FEX-Emu)**:
+- Both emulators might have the same bug → false negative (bug missed)
+- Both might have different bugs → no way to determine which is correct
+- No authoritative reference for edge cases and undefined behavior
+- Reduces confidence in bug detection
+
+**✅ Native-vs-Emulator Testing (Native x86 vs FEX-Emu)**:
+- Native execution is definitive - no emulator bugs possible
+- Clear ground truth for all x86 behavior including edge cases
+- High confidence: disagreement = FEX-Emu bug
+- Industry standard for emulator validation
+
+### Current Challenge: Simulation Address Space
+
+Many extracted assembly blocks reference memory addresses from the original binary's address space (e.g., `0x555555000000`). The current simulator uses a sandboxed memory range (`0x10000000-0x20000000`) and rejects out-of-range accesses, causing many simulations to fail.
+
+**Solution Required**: Implement address translation to map the original binary's address space into the simulation sandbox:
+1. Parse ELF headers to determine binary base address
+2. Copy relevant binary sections (.text, .data, .rodata) into sandbox
+3. Translate memory accesses from original addresses to sandbox addresses
+4. Execute with translated addresses to obtain correct results
+
+This will dramatically improve simulation success rate while maintaining native execution as ground truth.
+
 ## Build, Test, and Lint Commands
 
 - **Build**: `cargo build` (debug) or `cargo build --release` (release)
