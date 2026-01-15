@@ -17,6 +17,7 @@ pub struct BinaryInfo {
     pub architecture: String,
     pub endianness: String,
     pub base_address: u64,
+    pub entry_point: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +56,7 @@ impl Database {
                 architecture TEXT NOT NULL,
                 endianness TEXT NOT NULL,
                 base_address INTEGER NOT NULL DEFAULT 4194304,
+                entry_point INTEGER NOT NULL DEFAULT 0,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )",
             [],
@@ -153,6 +155,12 @@ impl Database {
             [],
         );
 
+        // Migration: Add entry_point column to existing binaries table if it doesn't exist
+        let _ = self.conn.execute(
+            "ALTER TABLE binaries ADD COLUMN entry_point INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+
         Ok(())
     }
 
@@ -175,8 +183,8 @@ impl Database {
                 Some(id) => id,
                 None => {
                     tx.execute(
-                        "INSERT INTO binaries (path, size, hash, format, architecture, endianness, base_address)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        "INSERT INTO binaries (path, size, hash, format, architecture, endianness, base_address, entry_point)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                         params![
                             binary_info.path,
                             binary_info.size as i64,
@@ -185,6 +193,7 @@ impl Database {
                             binary_info.architecture,
                             binary_info.endianness,
                             binary_info.base_address as i64,
+                            binary_info.entry_point as i64,
                         ],
                     )?;
                     tx.last_insert_rowid()
@@ -485,7 +494,7 @@ impl Database {
 
     pub fn get_binary_by_hash(&self, hash: &str) -> Result<BinaryInfo> {
         let mut stmt = self.conn.prepare(
-            "SELECT path, size, hash, format, architecture, endianness, base_address
+            "SELECT path, size, hash, format, architecture, endianness, base_address, entry_point
              FROM binaries WHERE hash = ?1",
         )?;
 
@@ -498,6 +507,7 @@ impl Database {
                 architecture: row.get(4)?,
                 endianness: row.get(5)?,
                 base_address: row.get::<_, i64>(6)? as u64,
+                entry_point: row.get::<_, i64>(7)? as u64,
             })
         })?;
 
@@ -621,8 +631,8 @@ impl Database {
 
     pub fn store_binary_info(&mut self, binary_info: &BinaryInfo) -> Result<()> {
         self.conn.execute(
-            "INSERT OR IGNORE INTO binaries (path, size, hash, format, architecture, endianness, base_address)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT OR IGNORE INTO binaries (path, size, hash, format, architecture, endianness, base_address, entry_point)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 binary_info.path,
                 binary_info.size as i64,
@@ -631,6 +641,7 @@ impl Database {
                 binary_info.architecture,
                 binary_info.endianness,
                 binary_info.base_address as i64,
+                binary_info.entry_point as i64,
             ],
         )?;
         Ok(())

@@ -60,6 +60,7 @@ fn test_end_to_end_simulation_workflow() {
         architecture: "x86_64".to_string(),
         endianness: "little".to_string(),
         base_address: 0x400000,
+        entry_point: 0x400000,
     };
 
     // Extract a block from the test binary

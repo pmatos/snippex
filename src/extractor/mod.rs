@@ -123,6 +123,9 @@ impl Extractor {
             .min() // Get the lowest non-zero address
             .unwrap_or(0x400000);
 
+        // Extract entry point address from ELF header
+        let entry_point = file.entry();
+
         Ok(BinaryInfo {
             path: self.binary_path.to_string_lossy().to_string(),
             size: self.binary_data.len() as u64,
@@ -131,6 +134,7 @@ impl Extractor {
             architecture,
             endianness,
             base_address,
+            entry_point,
         })
     }
 

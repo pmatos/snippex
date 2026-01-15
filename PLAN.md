@@ -159,10 +159,10 @@ When results differ, clearly show what's wrong (specific register, flag, or memo
 ### 1.1 ELF Parsing & Binary Context Extraction
 
 - [x] Add `base_address` field to `BinaryInfo` struct (virtual address where binary is loaded)
-- [ ] Implement ELF header parsing to extract:
+- [x] Implement ELF header parsing to extract:
   - [x] Program headers (LOAD segments)
   - [x] Virtual address base (first LOAD segment vaddr)
-  - [ ] Entry point address
+  - [x] Entry point address
 - [x] Store base address in database when extracting blocks
 - [x] Add migration for existing database entries (default to 0x400000 for backward compat)
 

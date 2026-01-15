@@ -41,6 +41,7 @@ mod tests {
             architecture: "x86_64".to_string(),
             endianness: "little".to_string(),
             base_address: 0x400000,
+            entry_point: 0x400000,
         };
 
         let assembly_block = vec![0x90, 0x90, 0x90, 0x90];
@@ -68,6 +69,7 @@ mod tests {
             architecture: "x86_64".to_string(),
             endianness: "little".to_string(),
             base_address: 0x400000,
+            entry_point: 0x400000,
         };
 
         let assembly_block = vec![0x90, 0x90];
