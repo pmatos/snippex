@@ -125,6 +125,14 @@ impl Simulator {
             sandbox.as_ref(),
         )?;
 
+        // DEBUG: Save assembly to /tmp for inspection
+        let debug_asm_path = format!("/tmp/debug_simulation_{}.asm", Uuid::new_v4());
+        if let Err(e) = std::fs::write(&debug_asm_path, &assembly_source) {
+            eprintln!("Warning: Could not save debug assembly to {}: {}", debug_asm_path, e);
+        } else {
+            eprintln!("DEBUG: Assembly saved to {}", debug_asm_path);
+        }
+
         // Compile and link
         let (binary_path, assembly_path) = self
             .compilation_pipeline
