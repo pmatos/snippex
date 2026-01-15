@@ -86,13 +86,43 @@ impl Simulator {
         // Generate random initial state
         let initial_state = self.random_generator.generate_initial_state(analysis);
 
-        // Generate assembly file
-        // TODO: Create and pass SandboxMemoryLayout once binary section loading is integrated
+        // Create sandbox with address translation if binary has valid base address
+        let sandbox = if extraction.binary_base_address > 0 {
+            use crate::extractor::section_loader::BinarySectionLoader;
+            use sandbox::SandboxMemoryLayout;
+            use std::path::Path;
+
+            let binary_path = Path::new(&extraction.binary_path);
+            if binary_path.exists() {
+                let mut sandbox_layout = SandboxMemoryLayout::new(extraction.binary_base_address);
+
+                if let Ok(loader) = BinarySectionLoader::new(binary_path) {
+                    if let Ok((text_meta, text_data)) = loader.extract_text_section() {
+                        let _ = sandbox_layout.add_section(text_meta, Some(text_data));
+                    }
+                    if let Ok((data_meta, data_data)) = loader.extract_data_section() {
+                        let _ = sandbox_layout.add_section(data_meta, Some(data_data));
+                    }
+                    if let Ok((rodata_meta, rodata_data)) = loader.extract_rodata_section() {
+                        let _ = sandbox_layout.add_section(rodata_meta, Some(rodata_data));
+                    }
+                    Some(sandbox_layout)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Generate assembly file with sandbox for address translation
         let assembly_source = self.assembly_generator.generate_simulation_file(
             extraction,
             analysis,
             &initial_state,
-            None, // No sandbox for now - maintains backward compatibility
+            sandbox.as_ref(),
         )?;
 
         // Compile and link
