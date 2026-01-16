@@ -5,6 +5,7 @@
 
 use crate::config::RemoteConfig;
 use crate::error::{Error, Result};
+use crate::remote::diagnostics::diagnose_remote_execution_failure;
 use crate::remote::executor::SSHExecutor;
 use crate::remote::package::ExecutionPackage;
 use crate::remote::transfer::SCPTransfer;
@@ -114,11 +115,14 @@ impl RemoteOrchestrator {
         let exec_result = self.ssh_executor.execute(&remote_command)?;
 
         if !exec_result.is_success() {
-            return Err(Error::InvalidBinary(format!(
-                "Remote simulation failed with exit code {}: {}",
+            let diagnosis = diagnose_remote_execution_failure(
                 exec_result.exit_code,
-                exec_result.stderr.trim()
-            )));
+                &exec_result.stderr,
+                &exec_result.stdout,
+                &remote_command,
+                &self.config.host,
+            );
+            return Err(Error::InvalidBinary(diagnosis));
         }
 
         // Download results.json from remote

@@ -304,10 +304,10 @@ When results differ, clearly show what's wrong (specific register, flag, or memo
   - [x] Retry with exponential backoff
   - [x] Fallback to local-only mode with warning
   - [x] Helpful error messages (check SSH keys, network, etc.)
-- [ ] Handle remote execution failures:
-  - [ ] Binary not found on remote
-  - [ ] Snippex not installed on remote
-  - [ ] Simulation failure on remote
+- [x] Handle remote execution failures:
+  - [x] Binary not found on remote
+  - [x] Snippex not installed on remote
+  - [x] Simulation failure on remote
 - [ ] Add timeout for remote operations (configurable, default 60s)
 - [ ] Cleanup on interruption (Ctrl+C)
 
