@@ -6,11 +6,14 @@
 //! happens on another.
 
 pub mod executor;
+pub mod orchestrator;
 pub mod package;
 pub mod transfer;
 
 #[allow(unused_imports)]
 pub use executor::{ExecutionResult, SSHExecutor};
+#[allow(unused_imports)]
+pub use orchestrator::RemoteOrchestrator;
 #[allow(unused_imports)]
 pub use package::{ExecutionPackage, PackageMetadata};
 #[allow(unused_imports)]

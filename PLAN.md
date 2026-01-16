@@ -4,6 +4,10 @@
 
 Snippex is a differential testing framework designed to **find bugs in FEX-Emu**, an x86-on-ARM64 dynamic binary translator. By extracting random assembly blocks from real-world x86 binaries and comparing native execution against FEX-Emu emulation, we can systematically uncover translation bugs, instruction edge cases, and behavioral discrepancies.
 
+## Implementation considerations
+
+Leave no warnings in the code. Ensure it's clean. Always test the code after implementing it. Be thorough in your implementation.
+
 ## The Problem We're Solving
 
 ### Current Challenge: Native Execution Failures
@@ -289,10 +293,10 @@ When results differ, clearly show what's wrong (specific register, flag, or memo
   - [x] Execute remote command
   - [x] Stream stdout/stderr for debugging
   - [x] Capture exit code
-- [ ] Implement result retrieval:
-  - [ ] SCP results.json back to local machine
-  - [ ] Parse result JSON
-  - [ ] Clean up remote temporary directory
+- [x] Implement result retrieval:
+  - [x] SCP results.json back to local machine
+  - [x] Parse result JSON
+  - [x] Clean up remote temporary directory
 
 ### 2.4 Error Handling & Resilience
 
