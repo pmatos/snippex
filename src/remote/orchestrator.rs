@@ -5,6 +5,7 @@
 
 use crate::config::RemoteConfig;
 use crate::error::{Error, Result};
+use crate::remote::cleanup::CleanupRegistry;
 use crate::remote::diagnostics::diagnose_remote_execution_failure;
 use crate::remote::executor::SSHExecutor;
 use crate::remote::package::ExecutionPackage;
@@ -20,6 +21,7 @@ pub struct RemoteOrchestrator {
     config: RemoteConfig,
     ssh_executor: SSHExecutor,
     scp_transfer: SCPTransfer,
+    cleanup_registry: Option<CleanupRegistry>,
 }
 
 impl RemoteOrchestrator {
@@ -32,6 +34,20 @@ impl RemoteOrchestrator {
             config,
             ssh_executor,
             scp_transfer,
+            cleanup_registry: None,
+        }
+    }
+
+    /// Creates a new remote orchestrator with cleanup registry for interrupt handling.
+    pub fn with_cleanup_registry(config: RemoteConfig, registry: CleanupRegistry) -> Self {
+        let ssh_executor = SSHExecutor::new(config.clone());
+        let scp_transfer = SCPTransfer::new(config.clone());
+
+        Self {
+            config,
+            ssh_executor,
+            scp_transfer,
+            cleanup_registry: Some(registry),
         }
     }
 
@@ -78,6 +94,14 @@ impl RemoteOrchestrator {
             remote_package_dir.display()
         );
 
+        // Register path for cleanup in case of interruption
+        if let Some(ref registry) = self.cleanup_registry {
+            // Get parent directory (the /tmp/snippex-{uuid} directory)
+            if let Some(parent) = remote_package_dir.parent() {
+                registry.register(self.config.clone(), parent.to_path_buf());
+            }
+        }
+
         // Execute simulation on remote
         let result = match self.execute_simulation_on_remote(&remote_package_dir) {
             Ok(result) => {
@@ -89,6 +113,14 @@ impl RemoteOrchestrator {
                 if let Err(cleanup_err) = self.cleanup_remote(&remote_package_dir) {
                     debug!("Failed to cleanup remote directory: {}", cleanup_err);
                 }
+
+                // Unregister from cleanup registry
+                if let Some(ref registry) = self.cleanup_registry {
+                    if let Some(parent) = remote_package_dir.parent() {
+                        registry.unregister(&parent.to_path_buf());
+                    }
+                }
+
                 return Err(e);
             }
         };
@@ -96,6 +128,13 @@ impl RemoteOrchestrator {
         // Clean up remote directory
         info!("Cleaning up remote files");
         self.cleanup_remote(&remote_package_dir)?;
+
+        // Unregister from cleanup registry after successful cleanup
+        if let Some(ref registry) = self.cleanup_registry {
+            if let Some(parent) = remote_package_dir.parent() {
+                registry.unregister(&parent.to_path_buf());
+            }
+        }
 
         Ok(result)
     }

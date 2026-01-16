@@ -309,7 +309,7 @@ When results differ, clearly show what's wrong (specific register, flag, or memo
   - [x] Snippex not installed on remote
   - [x] Simulation failure on remote
 - [x] Add timeout for remote operations (configurable, default 60s)
-- [ ] Cleanup on interruption (Ctrl+C)
+- [x] Cleanup on interruption (Ctrl+C)
 
 ### 2.5 Testing
 

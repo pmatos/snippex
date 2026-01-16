@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::sync::Arc;
 
 mod analyzer;
 mod cli;
@@ -49,6 +50,18 @@ enum Commands {
 fn main() -> Result<()> {
     // Initialize logging with INFO level by default
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+    // Create global cleanup registry for remote operations
+    let cleanup_registry = Arc::new(remote::CleanupRegistry::new());
+    let cleanup_for_handler = cleanup_registry.clone();
+
+    // Register Ctrl+C handler for cleanup on interruption
+    ctrlc::set_handler(move || {
+        log::warn!("Received interrupt signal (Ctrl+C), cleaning up...");
+        cleanup_for_handler.cleanup_all();
+        std::process::exit(130); // Exit code 130 for SIGINT
+    })
+    .expect("Error setting Ctrl+C handler");
 
     let cli = Cli::parse();
 

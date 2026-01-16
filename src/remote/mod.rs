@@ -5,6 +5,7 @@
 //! native x86 execution happens on one machine and FEX-Emu execution
 //! happens on another.
 
+pub mod cleanup;
 pub mod diagnostics;
 pub mod executor;
 pub mod orchestrator;
@@ -12,6 +13,8 @@ pub mod package;
 pub mod retry;
 pub mod transfer;
 
+#[allow(unused_imports)]
+pub use cleanup::CleanupRegistry;
 #[allow(unused_imports)]
 pub use diagnostics::{
     diagnose_remote_execution_failure, verify_simulation_dependencies, verify_snippex_installation,
