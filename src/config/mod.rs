@@ -57,7 +57,7 @@ pub struct Config {
 }
 
 /// Configuration for a remote machine.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RemoteConfig {
     /// Hostname or IP address of the remote machine
     pub host: String,
@@ -133,10 +133,44 @@ impl Config {
             return Ok(Config::default());
         }
 
-        let contents = fs::read_to_string(path).map_err(Error::Io)?;
+        let contents = fs::read_to_string(path).map_err(|e| {
+            Error::Io(std::io::Error::new(
+                e.kind(),
+                format!(
+                    "Failed to read config file: {}\n\n\
+                     File path: {}\n\n\
+                     Suggestions:\n\
+                     • Check file permissions: ls -la {}\n\
+                     • Verify the file is readable\n\
+                     • Try recreating with: snippex config init",
+                    e,
+                    path.display(),
+                    path.display()
+                ),
+            ))
+        })?;
 
-        let config: Config = serde_yaml::from_str(&contents)
-            .map_err(|e| Error::InvalidBinary(format!("Failed to parse config: {}", e)))?;
+        let config: Config = serde_yaml::from_str(&contents).map_err(|e| {
+            Error::InvalidBinary(format!(
+                "Failed to parse config file: {}\n\n\
+                 File path: {}\n\n\
+                 Suggestions:\n\
+                 • Check YAML syntax in the config file\n\
+                 • Verify indentation uses spaces, not tabs\n\
+                 • Backup and recreate: mv {} {}.bak && snippex config init\n\n\
+                 Example valid config:\n\
+                 remotes:\n\
+                   my-remote:\n\
+                     host: \"server.example.com\"\n\
+                     user: \"username\"\n\
+                     port: 22\n\
+                     snippex_path: \"snippex\"",
+                e,
+                path.display(),
+                path.display(),
+                path.display()
+            ))
+        })?;
 
         Ok(config)
     }
@@ -147,7 +181,11 @@ impl Config {
             Some(path) => self.save_to(&path),
             None => Err(Error::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                "Could not determine config directory",
+                "Could not determine config directory\n\n\
+                 Suggestions:\n\
+                 • Check HOME environment variable is set\n\
+                 • Verify XDG_CONFIG_HOME is accessible\n\
+                 • Try specifying path manually with snippex config init --path <path>",
             ))),
         }
     }
@@ -156,13 +194,43 @@ impl Config {
     pub fn save_to(&self, path: &PathBuf) -> Result<()> {
         // Create parent directories if they don't exist
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(Error::Io)?;
+            fs::create_dir_all(parent).map_err(|e| {
+                Error::Io(std::io::Error::new(
+                    e.kind(),
+                    format!(
+                        "Failed to create config directory: {}\n\n\
+                         Directory: {}\n\n\
+                         Suggestions:\n\
+                         • Check write permissions for parent directory\n\
+                         • Create directory manually: mkdir -p {}\n\
+                         • Verify disk space is available",
+                        e,
+                        parent.display(),
+                        parent.display()
+                    ),
+                ))
+            })?;
         }
 
         let contents = serde_yaml::to_string(self)
             .map_err(|e| Error::InvalidBinary(format!("Failed to serialize config: {}", e)))?;
 
-        fs::write(path, contents).map_err(Error::Io)?;
+        fs::write(path, contents).map_err(|e| {
+            Error::Io(std::io::Error::new(
+                e.kind(),
+                format!(
+                    "Failed to write config file: {}\n\n\
+                     File path: {}\n\n\
+                     Suggestions:\n\
+                     • Check write permissions: ls -la {}\n\
+                     • Verify parent directory exists\n\
+                     • Ensure sufficient disk space",
+                    e,
+                    path.display(),
+                    path.parent().map(|p| p.display().to_string()).unwrap_or_default()
+                ),
+            ))
+        })?;
 
         Ok(())
     }

@@ -42,7 +42,21 @@ pub struct Database {
 
 impl Database {
     pub fn new(path: &Path) -> Result<Self> {
-        let conn = Connection::open(path)?;
+        let conn = Connection::open(path).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to open database: {}\n\n\
+                 Database path: {}\n\n\
+                 Suggestions:\n\
+                 • Verify the directory exists: mkdir -p {}\n\
+                 • Check write permissions for the database directory\n\
+                 • If database is corrupted, try removing it: rm {}\n\
+                 • Ensure sufficient disk space is available",
+                e,
+                path.display(),
+                path.parent().map(|p| p.display().to_string()).unwrap_or_default(),
+                path.display()
+            )
+        })?;
         Ok(Database { conn })
     }
 
@@ -153,6 +167,36 @@ impl Database {
 
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_binaries_hash ON binaries(hash)",
+            [],
+        )?;
+
+        // Validation results cache table
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS validation_cache (
+                id INTEGER PRIMARY KEY,
+                extraction_id INTEGER NOT NULL,
+                emulator_type TEXT NOT NULL,
+                host_architecture TEXT NOT NULL,
+
+                -- Result data
+                exit_code INTEGER NOT NULL,
+                final_registers TEXT NOT NULL,
+                final_memory TEXT NOT NULL,
+                final_flags INTEGER NOT NULL,
+                execution_time_ns INTEGER NOT NULL,
+
+                -- Cache metadata
+                seed INTEGER,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+                FOREIGN KEY (extraction_id) REFERENCES extractions(id),
+                UNIQUE(extraction_id, emulator_type, seed)
+            )",
+            [],
+        )?;
+
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_validation_cache_extraction ON validation_cache(extraction_id)",
             [],
         )?;
 
@@ -664,4 +708,206 @@ impl Database {
         )?;
         Ok(())
     }
+
+    /// Stores a validation result in the cache.
+    pub fn store_validation_cache(
+        &mut self,
+        extraction_id: i64,
+        emulator_type: &str,
+        host_architecture: &str,
+        result: &crate::simulator::SimulationResult,
+        seed: Option<u64>,
+    ) -> Result<()> {
+        let final_registers = serde_json::to_string(&result.final_state.registers)?;
+        let final_memory = serde_json::to_string(&result.final_state.memory_locations)?;
+
+        self.conn.execute(
+            "INSERT OR REPLACE INTO validation_cache (
+                extraction_id, emulator_type, host_architecture,
+                exit_code, final_registers, final_memory, final_flags, execution_time_ns,
+                seed
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                extraction_id,
+                emulator_type,
+                host_architecture,
+                result.exit_code,
+                final_registers,
+                final_memory,
+                result.final_state.flags as i64,
+                result.execution_time.as_nanos() as i64,
+                seed.map(|s| s as i64),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Retrieves a cached validation result if available and not expired.
+    pub fn get_validation_cache(
+        &self,
+        extraction_id: i64,
+        emulator_type: &str,
+        seed: Option<u64>,
+        ttl_days: u32,
+    ) -> Result<Option<CachedValidationResult>> {
+        let ttl_seconds = ttl_days as i64 * 24 * 60 * 60;
+
+        let mut stmt = self.conn.prepare(
+            "SELECT exit_code, final_registers, final_memory, final_flags, execution_time_ns,
+                    host_architecture, created_at
+             FROM validation_cache
+             WHERE extraction_id = ?1
+               AND emulator_type = ?2
+               AND ((?3 IS NULL AND seed IS NULL) OR seed = ?3)
+               AND julianday('now') - julianday(created_at) < ?4 / 86400.0",
+        )?;
+
+        let result = stmt.query_row(
+            params![
+                extraction_id,
+                emulator_type,
+                seed.map(|s| s as i64),
+                ttl_seconds,
+            ],
+            |row| {
+                let exit_code: i32 = row.get(0)?;
+                let final_registers_json: String = row.get(1)?;
+                let final_memory_json: String = row.get(2)?;
+                let final_flags: i64 = row.get(3)?;
+                let execution_time_ns: i64 = row.get(4)?;
+                let host_architecture: String = row.get(5)?;
+                let created_at: String = row.get(6)?;
+
+                Ok((
+                    exit_code,
+                    final_registers_json,
+                    final_memory_json,
+                    final_flags,
+                    execution_time_ns,
+                    host_architecture,
+                    created_at,
+                ))
+            },
+        );
+
+        match result {
+            Ok((
+                exit_code,
+                final_registers_json,
+                final_memory_json,
+                final_flags,
+                execution_time_ns,
+                host_architecture,
+                created_at,
+            )) => {
+                let final_registers = serde_json::from_str(&final_registers_json)
+                    .map_err(|e| anyhow::anyhow!("Failed to parse cached registers: {}", e))?;
+                let final_memory = serde_json::from_str(&final_memory_json)
+                    .map_err(|e| anyhow::anyhow!("Failed to parse cached memory: {}", e))?;
+
+                Ok(Some(CachedValidationResult {
+                    exit_code,
+                    final_state: crate::simulator::FinalState {
+                        registers: final_registers,
+                        memory_locations: final_memory,
+                        flags: final_flags as u64,
+                    },
+                    execution_time: std::time::Duration::from_nanos(execution_time_ns as u64),
+                    host_architecture,
+                    cached_at: created_at,
+                }))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Clears all validation cache entries.
+    pub fn clear_validation_cache(&mut self) -> Result<usize> {
+        let count: usize =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM validation_cache", [], |row| {
+                    row.get::<_, i64>(0)
+                })? as usize;
+
+        self.conn.execute("DELETE FROM validation_cache", [])?;
+        Ok(count)
+    }
+
+    /// Clears validation cache entries older than the specified TTL.
+    pub fn clear_expired_validation_cache(&mut self, ttl_days: u32) -> Result<usize> {
+        let ttl_seconds = ttl_days as i64 * 24 * 60 * 60;
+
+        let count = self.conn.execute(
+            "DELETE FROM validation_cache
+             WHERE julianday('now') - julianday(created_at) >= ?1 / 86400.0",
+            params![ttl_seconds],
+        )?;
+
+        Ok(count)
+    }
+
+    /// Gets cache statistics.
+    pub fn get_validation_cache_stats(&self) -> Result<ValidationCacheStats> {
+        let total: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM validation_cache", [], |row| {
+                    row.get(0)
+                })?;
+
+        let native_count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM validation_cache WHERE emulator_type = 'native'",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let fex_count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM validation_cache WHERE emulator_type = 'fex-emu'",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let oldest: Option<String> = self
+            .conn
+            .query_row("SELECT MIN(created_at) FROM validation_cache", [], |row| {
+                row.get(0)
+            })
+            .ok();
+
+        let newest: Option<String> = self
+            .conn
+            .query_row("SELECT MAX(created_at) FROM validation_cache", [], |row| {
+                row.get(0)
+            })
+            .ok();
+
+        Ok(ValidationCacheStats {
+            total_entries: total as usize,
+            native_entries: native_count as usize,
+            fex_entries: fex_count as usize,
+            oldest_entry: oldest,
+            newest_entry: newest,
+        })
+    }
+}
+
+/// Cached validation result.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct CachedValidationResult {
+    pub exit_code: i32,
+    pub final_state: crate::simulator::FinalState,
+    pub execution_time: std::time::Duration,
+    pub host_architecture: String,
+    pub cached_at: String,
+}
+
+/// Statistics about the validation cache.
+#[derive(Debug, Clone)]
+pub struct ValidationCacheStats {
+    pub total_entries: usize,
+    pub native_entries: usize,
+    pub fex_entries: usize,
+    pub oldest_entry: Option<String>,
+    pub newest_entry: Option<String>,
 }

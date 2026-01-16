@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tempfile::TempDir;
 
+use super::diagnostics;
 use crate::error::{Error, Result};
 
 pub struct CompilationPipeline {
@@ -14,26 +15,114 @@ pub struct CompilationPipeline {
 
 impl CompilationPipeline {
     pub fn new() -> Result<Self> {
-        // Check if NASM is available
+        Self::for_target("x86_64")
+    }
+
+    pub fn for_target(target_arch: &str) -> Result<Self> {
+        // Check if NASM is available with detailed error message
         let nasm_path = Self::find_executable("nasm").ok_or_else(|| {
-            Error::Simulation("NASM assembler not found. Please install NASM.".to_string())
+            if let Err(msg) = diagnostics::check_nasm_installation() {
+                Error::Simulation(msg)
+            } else {
+                Error::Simulation(
+                    "NASM assembler not found in PATH\n\n\
+                     Suggestions:\n\
+                     • Ubuntu/Debian: sudo apt install nasm\n\
+                     • RHEL/CentOS: sudo yum install nasm\n\
+                     • Arch Linux: sudo pacman -S nasm\n\
+                     • macOS: brew install nasm\n\n\
+                     Verify installation with: nasm --version"
+                        .to_string(),
+                )
+            }
         })?;
 
-        // Check if ld is available
-        let ld_path = Self::find_executable("ld").ok_or_else(|| {
-            Error::Simulation("ld linker not found. Please install binutils.".to_string())
-        })?;
+        // Determine which linker to use based on host and target architecture
+        let ld_path = Self::find_linker_for_target(target_arch)?;
 
         // Create temporary directory with secure permissions
         let temp_dir = tempfile::Builder::new()
             .prefix("fezinator_sim_")
             .tempdir()
-            .map_err(|e| Error::Simulation(format!("Failed to create temp directory: {e}")))?;
+            .map_err(|e| {
+                Error::Simulation(format!(
+                    "Failed to create temp directory: {}\n\n\
+                     Suggestions:\n\
+                     • Check disk space: df -h /tmp\n\
+                     • Verify /tmp permissions: ls -la /tmp\n\
+                     • Check TMPDIR environment variable\n\
+                     • Try setting TMPDIR to a writable directory",
+                    e
+                ))
+            })?;
 
         Ok(Self {
             nasm_path,
             ld_path,
             temp_dir,
+        })
+    }
+
+    fn find_linker_for_target(target_arch: &str) -> Result<PathBuf> {
+        let host_arch = std::env::consts::ARCH;
+
+        // If host matches target, use native linker
+        let needs_cross = match (host_arch, target_arch) {
+            ("x86_64", "x86_64") => false,
+            ("x86_64", "i386") => false,
+            ("aarch64", "aarch64") => false,
+            ("aarch64", "x86_64") => true,
+            ("aarch64", "i386") => true,
+            ("x86_64", "aarch64") => true,
+            _ => false,
+        };
+
+        if needs_cross {
+            // Try cross-compilation linker first
+            let cross_ld = format!("{}-linux-gnu-ld", target_arch);
+            if let Some(path) = Self::find_executable(&cross_ld) {
+                log::info!("Using cross-linker: {}", path.display());
+                return Ok(path);
+            }
+
+            // Alternative naming for i386/i686
+            if target_arch == "i386" {
+                if let Some(path) = Self::find_executable("i686-linux-gnu-ld") {
+                    log::info!("Using cross-linker: {}", path.display());
+                    return Ok(path);
+                }
+            }
+
+            if let Err(msg) = diagnostics::check_cross_compilation_tools(target_arch) {
+                return Err(Error::Simulation(msg));
+            } else {
+                return Err(Error::Simulation(format!(
+                    "Cross-linker not found for target {}\n\n\
+                     Suggestions:\n\
+                     • Ubuntu/Debian: sudo apt install gcc-{}-linux-gnu\n\
+                     • RHEL/CentOS: sudo yum install gcc-{}-linux-gnu\n\
+                     • Verify with: which {}-linux-gnu-ld",
+                    target_arch, target_arch, target_arch, target_arch
+                )));
+            }
+        }
+
+        // Use native linker
+        Self::find_executable("ld").ok_or_else(|| {
+            if let Err(msg) = diagnostics::check_linker_installation() {
+                Error::Simulation(msg)
+            } else {
+                Error::Simulation(
+                    "Linker (ld) not found in PATH\n\n\
+                     Suggestions:\n\
+                     • Ubuntu/Debian: sudo apt install binutils\n\
+                     • RHEL/CentOS: sudo yum install binutils\n\
+                     • Arch Linux: sudo pacman -S binutils\n\
+                     • macOS: Install Xcode Command Line Tools: xcode-select --install\n\n\
+                     Verify installation with: ld --version"
+                        .to_string(),
+                )
+            }
         })
     }
 
@@ -73,11 +162,22 @@ impl CompilationPipeline {
             .arg(obj_file)
             .arg(asm_file)
             .output()
-            .map_err(|e| Error::Simulation(format!("Failed to run NASM: {e}")))?;
+            .map_err(|e| {
+                Error::Simulation(format!(
+                    "Failed to run NASM: {}\n\n\
+                     Suggestions:\n\
+                     • Verify NASM is installed: nasm --version\n\
+                     • Check NASM path: {}\n\
+                     • Reinstall if needed: sudo apt install nasm",
+                    e,
+                    self.nasm_path.display()
+                ))
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(Error::Simulation(format!("NASM assembly failed: {stderr}")));
+            let diag = diagnostics::diagnose_nasm_error(&stderr, asm_file);
+            return Err(Error::Simulation(diag));
         }
 
         Ok(())
@@ -89,11 +189,22 @@ impl CompilationPipeline {
             .arg(binary_file)
             .arg(obj_file)
             .output()
-            .map_err(|e| Error::Simulation(format!("Failed to run ld: {e}")))?;
+            .map_err(|e| {
+                Error::Simulation(format!(
+                    "Failed to run linker: {}\n\n\
+                     Suggestions:\n\
+                     • Verify linker is installed: ld --version\n\
+                     • Check linker path: {}\n\
+                     • Reinstall if needed: sudo apt install binutils",
+                    e,
+                    self.ld_path.display()
+                ))
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(Error::Simulation(format!("ld linking failed: {stderr}")));
+            let diag = diagnostics::diagnose_linker_error(&stderr, obj_file, binary_file);
+            return Err(Error::Simulation(diag));
         }
 
         Ok(())

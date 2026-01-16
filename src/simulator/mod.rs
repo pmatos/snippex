@@ -1,5 +1,6 @@
 pub mod assembly_generator;
 pub mod compilation;
+pub mod diagnostics;
 pub mod emulator;
 pub mod execution;
 pub mod random_generator;
@@ -69,9 +70,13 @@ pub struct Simulator {
 
 impl Simulator {
     pub fn new() -> crate::error::Result<Self> {
+        Self::for_target("x86_64")
+    }
+
+    pub fn for_target(target_arch: &str) -> crate::error::Result<Self> {
         Ok(Self {
             assembly_generator: AssemblyGenerator::new(),
-            compilation_pipeline: CompilationPipeline::new()?,
+            compilation_pipeline: CompilationPipeline::for_target(target_arch)?,
             execution_harness: ExecutionHarness::new(),
             random_generator: RandomStateGenerator::new(),
         })
