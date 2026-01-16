@@ -191,7 +191,7 @@ mod tests {
 
         let (metadata, data) = result.unwrap();
         assert_eq!(metadata.name, ".text");
-        assert!(data.len() > 0);
+        assert!(!data.is_empty());
         assert!(metadata.is_executable);
     }
 
@@ -203,7 +203,7 @@ mod tests {
         assert!(result.is_ok());
 
         let sections = result.unwrap();
-        assert!(sections.len() > 0);
+        assert!(!sections.is_empty());
 
         // Check that .text section is present
         let has_text = sections.iter().any(|(meta, _)| meta.name == ".text");

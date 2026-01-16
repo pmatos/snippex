@@ -86,7 +86,19 @@ impl Simulator {
     ) -> crate::error::Result<SimulationResult> {
         // Generate random initial state
         let initial_state = self.random_generator.generate_initial_state(analysis);
+        self.simulate_block_with_state(extraction, analysis, &initial_state, emulator, keep_files)
+    }
 
+    /// Simulate a block with a provided initial state.
+    /// Used by remote execution to replay with the same state.
+    pub fn simulate_block_with_state(
+        &mut self,
+        extraction: &ExtractionInfo,
+        analysis: &BlockAnalysis,
+        initial_state: &InitialState,
+        emulator: Option<EmulatorConfig>,
+        keep_files: bool,
+    ) -> crate::error::Result<SimulationResult> {
         // Create sandbox with address translation if binary has valid base address
         let sandbox = if extraction.binary_base_address > 0 {
             use crate::extractor::section_loader::BinarySectionLoader;
@@ -122,7 +134,7 @@ impl Simulator {
         let assembly_source = self.assembly_generator.generate_simulation_file(
             extraction,
             analysis,
-            &initial_state,
+            initial_state,
             sandbox.as_ref(),
         )?;
 
@@ -163,7 +175,7 @@ impl Simulator {
         };
 
         Ok(SimulationResult::new(
-            initial_state,
+            initial_state.clone(),
             final_state,
             execution_result.execution_time,
             execution_result.exit_code,

@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod db_tests {
     use crate::db::{BinaryInfo, Database};
     use tempfile::NamedTempFile;
 

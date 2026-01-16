@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod simulator_tests {
     use crate::analyzer::{BlockAnalysis, ExitPoint, ExitType};
     use crate::db::ExtractionInfo;
     use crate::simulator::*;

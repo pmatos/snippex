@@ -3,14 +3,17 @@ use clap::{Parser, Subcommand};
 
 mod analyzer;
 mod cli;
+mod config;
 mod db;
 mod error;
 mod export;
 mod extractor;
+mod remote;
 mod simulator;
 
 use cli::analyze::AnalyzeCommand;
 use cli::compare::CompareCommand;
+use cli::config::ConfigCommand;
 use cli::export::ExportCommand;
 use cli::extract::ExtractCommand;
 use cli::import::ImportCommand;
@@ -18,6 +21,7 @@ use cli::import_results::ImportResultsCommand;
 use cli::list::ListCommand;
 use cli::remove::RemoveCommand;
 use cli::simulate::SimulateCommand;
+use cli::simulate_remote::SimulateRemoteCommand;
 
 #[derive(Parser)]
 #[command(name = "snippex")]
@@ -35,9 +39,11 @@ enum Commands {
     Remove(RemoveCommand),
     Analyze(AnalyzeCommand),
     Simulate(SimulateCommand),
+    SimulateRemote(SimulateRemoteCommand),
     Export(ExportCommand),
     ImportResults(ImportResultsCommand),
     Compare(CompareCommand),
+    Config(ConfigCommand),
 }
 
 fn main() -> Result<()> {
@@ -53,8 +59,10 @@ fn main() -> Result<()> {
         Commands::Remove(cmd) => cmd.execute(),
         Commands::Analyze(cmd) => cmd.execute(),
         Commands::Simulate(cmd) => cmd.execute(),
+        Commands::SimulateRemote(cmd) => cmd.execute(),
         Commands::Export(cmd) => cmd.execute(),
         Commands::ImportResults(cmd) => cmd.execute(),
         Commands::Compare(cmd) => cmd.execute(),
+        Commands::Config(cmd) => cmd.execute(),
     }
 }

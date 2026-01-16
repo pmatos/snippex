@@ -224,8 +224,8 @@ When results differ, clearly show what's wrong (specific register, flag, or memo
 ### 1.6 Documentation
 
 - [x] Document address translation algorithm in code comments
-- [ ] Update README.md with improved simulation success rates
-- [ ] Add troubleshooting guide for simulation failures
+- [x] Update README.md with improved simulation success rates
+- [x] Add troubleshooting guide for simulation failures
 - [x] Document limitations (e.g., syscalls still won't work)
 
 ---
@@ -238,7 +238,7 @@ When results differ, clearly show what's wrong (specific register, flag, or memo
 
 ### 2.1 Configuration Management
 
-- [ ] Design configuration file format (`~/.config/snippex/config.yml`):
+- [x] Design configuration file format (`~/.config/snippex/config.yml`):
   ```yaml
   remotes:
     x86-oracle:
@@ -254,41 +254,41 @@ When results differ, clearly show what's wrong (specific register, flag, or memo
       snippex_path: "/usr/local/bin/snippex"
       ssh_key: "~/.ssh/id_rsa"
   ```
-- [ ] Implement `Config` struct and YAML parsing (use `serde_yaml`)
-- [ ] Add `snippex config` command to view/edit configuration
-- [ ] Add `snippex config validate` to test SSH connections
-- [ ] Handle missing config gracefully (local-only mode)
+- [x] Implement `Config` struct and YAML parsing (use `serde_yaml`)
+- [x] Add `snippex config` command to view/edit configuration
+- [x] Add `snippex config validate` to test SSH connections
+- [x] Handle missing config gracefully (local-only mode)
 
 ### 2.2 Data Packaging & Transfer
 
-- [ ] Design `ExecutionPackage` format:
-  - [ ] Binary file (or path if available on remote)
-  - [ ] Extraction metadata (id, addresses, size)
-  - [ ] Analysis results
-  - [ ] Initial state (registers, memory)
-  - [ ] Emulator configuration
-- [ ] Implement packaging:
-  - [ ] Create temporary directory
-  - [ ] Copy binary to package
-  - [ ] Serialize metadata to JSON
-  - [ ] Create tarball
-- [ ] Implement transfer via SCP:
-  - [ ] Upload package to remote `/tmp/snippex-{uuid}/`
-  - [ ] Progress indicator for large binaries
-  - [ ] Handle transfer errors and retries
+- [x] Design `ExecutionPackage` format:
+  - [x] Binary file (or path if available on remote)
+  - [x] Extraction metadata (id, addresses, size)
+  - [x] Analysis results
+  - [x] Initial state (registers, memory)
+  - [x] Emulator configuration
+- [x] Implement packaging:
+  - [x] Create temporary directory
+  - [x] Copy binary to package
+  - [x] Serialize metadata to JSON
+  - [x] Create tarball
+- [x] Implement transfer via SCP:
+  - [x] Upload package to remote `/tmp/snippex-{uuid}/`
+  - [x] Progress indicator for large binaries
+  - [x] Handle transfer errors and retries
 
 ### 2.3 Remote Invocation Protocol
 
-- [ ] Add `snippex simulate-remote` subcommand:
-  - [ ] Accepts `--package <path>` argument
-  - [ ] Unpacks tarball
-  - [ ] Runs simulation locally on remote machine
-  - [ ] Writes results to JSON file
-- [ ] Implement `SSHExecutor`:
-  - [ ] Establish SSH connection (use `ssh2` crate)
-  - [ ] Execute remote command
-  - [ ] Stream stdout/stderr for debugging
-  - [ ] Capture exit code
+- [x] Add `snippex simulate-remote` subcommand:
+  - [x] Accepts `--package <path>` argument
+  - [x] Unpacks tarball
+  - [x] Runs simulation locally on remote machine
+  - [x] Writes results to JSON file
+- [x] Implement `SSHExecutor`:
+  - [x] Establish SSH connection (use `ssh2` crate)
+  - [x] Execute remote command
+  - [x] Stream stdout/stderr for debugging
+  - [x] Capture exit code
 - [ ] Implement result retrieval:
   - [ ] SCP results.json back to local machine
   - [ ] Parse result JSON

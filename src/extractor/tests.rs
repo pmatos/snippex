@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod extractor_tests {
     use crate::extractor::Extractor;
     use object::ObjectSection;
     use std::fs;
