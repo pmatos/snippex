@@ -313,7 +313,7 @@ When results differ, clearly show what's wrong (specific register, flag, or memo
 
 ### 2.5 Testing
 
-- [ ] Unit tests for packaging/unpacking
+- [x] Unit tests for packaging/unpacking
 - [ ] Integration test with local SSH (localhost)
 - [ ] Manual test with real remote machines
 - [ ] Test error scenarios (bad SSH key, network down, etc.)
