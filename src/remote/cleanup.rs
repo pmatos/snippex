@@ -3,6 +3,8 @@
 //! This module provides mechanisms to ensure remote resources are cleaned up
 //! even when operations are interrupted (e.g., via Ctrl+C).
 
+#![allow(dead_code)]
+
 use crate::config::RemoteConfig;
 use crate::remote::transfer::SCPTransfer;
 use log::{debug, warn};
@@ -50,7 +52,10 @@ impl CleanupRegistry {
                 return;
             }
 
-            warn!("Performing emergency cleanup of {} remote paths", paths.len());
+            warn!(
+                "Performing emergency cleanup of {} remote paths",
+                paths.len()
+            );
 
             for (config, path) in paths.iter() {
                 debug!("Cleaning up remote path: {}", path.display());

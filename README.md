@@ -250,9 +250,136 @@ With address translation enabled, simulation success rates have significantly im
 
 Blocks that still fail typically contain system calls, external function calls, or TLS accesses - these are fundamental limitations of sandboxed execution.
 
-## Cross-Platform Testing
+## Remote Execution & Cross-Platform Testing
 
 Snippex supports cross-platform testing to compare native execution on Intel/AMD64 with emulated execution on ARM64 using FEX-Emu. This enables testing and validation of x86/x86_64 assembly blocks across different host architectures.
+
+### SSH Remote Execution
+
+Snippex can execute simulations on remote machines via SSH. This enables:
+- Running native x86 simulations from an ARM64 host (via x86 remote)
+- Running FEX-Emu simulations from an x86 host (via ARM64 remote)
+
+#### Configuration File
+
+Create `~/.config/snippex/config.yml` to configure remote machines:
+
+```yaml
+remotes:
+  # Example x86_64 remote for native execution
+  x86-oracle:
+    host: "intel-server.example.com"
+    user: "username"
+    port: 22
+    snippex_path: "/usr/local/bin/snippex"
+    ssh_key: "~/.ssh/id_rsa"
+    architecture: "x86_64"
+
+  # Example ARM64 remote for FEX-Emu execution
+  arm64-fex:
+    host: "arm-server.example.com"
+    user: "username"
+    port: 22
+    snippex_path: "/home/username/bin/snippex"
+    ssh_key: "~/.ssh/id_rsa"
+    architecture: "aarch64"
+```
+
+#### SSH Requirements
+
+- SSH key-based authentication (password authentication not supported)
+- `snippex` must be installed on the remote machine
+- Remote user must have write access to `/tmp`
+- Remote machine should have required tools (NASM, ld, FEX-Emu as needed)
+
+#### Config Commands
+
+```bash
+# Show current configuration
+snippex config show
+
+# Add a new remote
+snippex config set x86-server --host intel.example.com --user admin --arch x86_64
+
+# Remove a remote
+snippex config remove x86-server
+
+# Validate SSH connections
+snippex config validate
+```
+
+### Validate Command
+
+The `validate` command provides unified cross-architecture validation. It automatically detects the host architecture and dispatches simulations to appropriate targets:
+
+```bash
+# Validate a block (auto-detects architecture and routes appropriately)
+snippex validate 1
+
+# Validate with verbose output
+snippex validate 1 --verbose
+
+# Native execution only (skip FEX-Emu)
+snippex validate 1 --native-only
+
+# FEX-Emu execution only (skip native)
+snippex validate 1 --fex-only
+
+# Use specific random seed for reproducibility
+snippex validate 1 --seed 12345
+
+# Skip cache and force re-execution
+snippex validate 1 --no-cache
+```
+
+#### How Validation Works
+
+**On x86_64 host:**
+- Native execution runs locally
+- FEX-Emu execution runs on configured ARM64 remote (if available)
+
+**On ARM64 host:**
+- Native execution runs on configured x86_64 remote (if available)
+- FEX-Emu execution runs locally
+
+### Batch Validation
+
+Validate multiple blocks in a single command:
+
+```bash
+# Validate blocks 1 through 100
+snippex validate-batch 1-100
+
+# Validate specific blocks
+snippex validate-batch 1,5,10,15
+
+# Validate all blocks
+snippex validate-batch all
+
+# Stop on first failure
+snippex validate-batch 1-50 --stop-on-failure
+
+# Output as JSON
+snippex validate-batch 1-20 --output-json
+```
+
+### Result Caching
+
+Validation results are cached to avoid redundant executions:
+
+```bash
+# View cache statistics
+snippex cache stats
+
+# Clear all cached results
+snippex cache clear
+
+# Clear only expired entries (older than 7 days)
+snippex cache expire --ttl 7
+
+# Force re-execution (bypass cache)
+snippex validate 1 --no-cache
+```
 
 ### Export/Import Workflow
 
@@ -375,6 +502,30 @@ snippex compare 1 --emulators native,fex-emu
 ```
 
 This workflow enables systematic testing of FEX-Emu compatibility and performance against native execution.
+
+## Shell Completions
+
+Snippex can generate shell completion scripts for bash, zsh, fish, PowerShell, and Elvish:
+
+```bash
+# Generate bash completions
+snippex completions bash > ~/.local/share/bash-completion/completions/snippex
+
+# Generate zsh completions
+snippex completions zsh > ~/.zfunc/_snippex
+# Make sure ~/.zfunc is in your fpath
+
+# Generate fish completions
+snippex completions fish > ~/.config/fish/completions/snippex.fish
+
+# Generate PowerShell completions
+snippex completions powershell > $PROFILE.CurrentUserAllHosts
+
+# Generate Elvish completions
+snippex completions elvish > ~/.config/elvish/lib/snippex.elv
+```
+
+After generating, restart your shell or source the completion file.
 
 ## Contributing
 

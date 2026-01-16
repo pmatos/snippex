@@ -1,4 +1,5 @@
 pub mod analyzer;
+pub mod arch;
 pub mod config;
 pub mod db;
 pub mod error;

@@ -26,7 +26,14 @@ impl AnalyzeCommand {
     pub fn execute(self) -> Result<()> {
         // Check if database exists
         if !self.database.exists() {
-            return Err(anyhow!("No database found"));
+            return Err(anyhow!(
+                "Database not found at '{}'\n\n\
+                 Suggestions:\n\
+                 • Extract blocks first: snippex extract <binary>\n\
+                 • Specify a different database: snippex analyze {} -d <path>",
+                self.database.display(),
+                self.block_number
+            ));
         }
 
         let mut db = Database::new(&self.database)?;
@@ -35,13 +42,22 @@ impl AnalyzeCommand {
         let extractions = match db.list_extractions() {
             Ok(extractions) => extractions,
             Err(_) => {
-                return Err(anyhow!("No blocks found in database"));
+                return Err(anyhow!(
+                    "No blocks found in database\n\n\
+                     Suggestions:\n\
+                     • Extract blocks first: snippex extract <binary>\n\
+                     • Import NASM file: snippex import <file.asm>"
+                ));
             }
         };
 
         if self.block_number == 0 || self.block_number > extractions.len() {
             return Err(anyhow!(
-                "Invalid block number. Valid range: 1-{}",
+                "Invalid block number: {}\n\n\
+                 Valid block range: 1-{}\n\n\
+                 Suggestions:\n\
+                 • List available blocks: snippex list",
+                self.block_number,
                 extractions.len()
             ));
         }

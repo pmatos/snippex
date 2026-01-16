@@ -16,8 +16,8 @@ pub struct ImportCommand {
     nasm_file: PathBuf,
 
     #[arg(
-        short,
-        long,
+        short = 'a',
+        long = "target-arch",
         help = "Target architecture (x86 or x86_64). Auto-detected from file if not specified"
     )]
     arch: Option<String>,

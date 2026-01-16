@@ -3,6 +3,8 @@
 //! This module provides retry mechanisms for SSH connections and remote
 //! operations that may fail due to transient network issues.
 
+#![allow(dead_code)]
+
 use crate::error::{Error, Result};
 use log::{debug, warn};
 use std::thread;
@@ -45,8 +47,7 @@ impl RetryConfig {
 
     /// Calculates the delay for a given retry attempt.
     fn calculate_delay(&self, attempt: u32) -> Duration {
-        let delay_ms = (self.initial_delay_ms as f64
-            * self.backoff_multiplier.powi(attempt as i32))
+        let delay_ms = (self.initial_delay_ms as f64 * self.backoff_multiplier.powi(attempt as i32))
             .min(self.max_delay_ms as f64) as u64;
 
         Duration::from_millis(delay_ms)
@@ -138,10 +139,7 @@ pub fn diagnose_ssh_error(error: &Error, host: &str, port: u16, ssh_key: Option<
         suggestions.push("• Verify your SSH key has correct permissions (chmod 600)".to_string());
 
         if let Some(key) = ssh_key {
-            suggestions.push(format!(
-                "• Check that the SSH key exists: {}",
-                key
-            ));
+            suggestions.push(format!("• Check that the SSH key exists: {}", key));
             suggestions.push(format!(
                 "• Verify the public key is in ~/.ssh/authorized_keys on {}",
                 host

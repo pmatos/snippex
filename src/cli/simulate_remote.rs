@@ -135,8 +135,9 @@ impl SimulateRemoteCommand {
             println!("  Emulator: native");
         }
 
-        // Initialize simulator
-        let mut simulator = Simulator::new()?;
+        // Initialize simulator with the target architecture from the package
+        let target_arch = &package.extraction.binary_architecture;
+        let mut simulator = Simulator::for_target(target_arch)?;
 
         // Run simulation with the provided initial state
         let result = simulator.simulate_block_with_state(

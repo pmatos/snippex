@@ -4,6 +4,8 @@
 //! and executing commands on remote machines, with support for streaming
 //! output and capturing exit codes.
 
+#![allow(dead_code)]
+
 use crate::config::RemoteConfig;
 use crate::error::{Error, Result};
 use crate::remote::retry::{diagnose_ssh_error, retry_with_backoff, RetryConfig};
@@ -76,11 +78,8 @@ impl SSHExecutor {
         );
 
         // Wrap connection attempt with retry logic
-        let result = retry_with_backoff(
-            &self.retry_config,
-            || self.connect_once(),
-            &connection_str,
-        );
+        let result =
+            retry_with_backoff(&self.retry_config, || self.connect_once(), &connection_str);
 
         // If connection failed after all retries, provide helpful diagnostics
         if let Err(ref e) = result {
@@ -98,23 +97,39 @@ impl SSHExecutor {
 
     /// Attempts to establish an SSH connection once (without retry).
     fn connect_once(&self) -> Result<Session> {
-        debug!("Attempting SSH connection to {}:{}", self.config.host, self.config.port);
+        use std::net::ToSocketAddrs;
+
+        debug!(
+            "Attempting SSH connection to {}:{}",
+            self.config.host, self.config.port
+        );
+
+        // Resolve hostname to socket address
+        let addr_str = format!("{}:{}", self.config.host, self.config.port);
+        let addr = addr_str
+            .to_socket_addrs()
+            .map_err(|e| {
+                Error::InvalidBinary(format!(
+                    "Failed to resolve host '{}': {}",
+                    self.config.host, e
+                ))
+            })?
+            .next()
+            .ok_or_else(|| {
+                Error::InvalidBinary(format!(
+                    "No addresses found for host '{}'",
+                    self.config.host
+                ))
+            })?;
 
         // Establish TCP connection with timeout
-        let tcp = TcpStream::connect_timeout(
-            &format!("{}:{}", self.config.host, self.config.port)
-                .parse()
-                .map_err(|e| {
-                    Error::InvalidBinary(format!("Failed to parse host address: {}", e))
-                })?,
-            Duration::from_secs(self.config.timeout),
-        )
-        .map_err(|e| {
-            Error::Io(std::io::Error::new(
-                e.kind(),
-                format!("Failed to connect to {}: {}", self.config.host, e),
-            ))
-        })?;
+        let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(self.config.timeout))
+            .map_err(|e| {
+                Error::Io(std::io::Error::new(
+                    e.kind(),
+                    format!("Failed to connect to {}: {}", self.config.host, e),
+                ))
+            })?;
 
         // Set read/write timeouts
         tcp.set_read_timeout(Some(Duration::from_secs(self.config.timeout)))
@@ -222,9 +237,7 @@ impl SSHExecutor {
 
         // Read stdout
         let mut stdout = String::new();
-        channel
-            .read_to_string(&mut stdout)
-            .map_err(Error::Io)?;
+        channel.read_to_string(&mut stdout).map_err(Error::Io)?;
 
         // Read stderr
         let mut stderr = String::new();

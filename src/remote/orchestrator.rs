@@ -3,6 +3,8 @@
 //! This module provides the glue between packaging, transfer, execution,
 //! and result retrieval for remote simulations.
 
+#![allow(dead_code)]
+
 use crate::config::RemoteConfig;
 use crate::error::{Error, Result};
 use crate::remote::cleanup::CleanupRegistry;
@@ -167,7 +169,8 @@ impl RemoteOrchestrator {
         // Download results.json from remote
         info!("Downloading simulation results");
         let results_path = remote_package_dir.join("results.json");
-        let local_results_path = TempDir::new().map_err(Error::Io)?.path().join("results.json");
+        let local_temp_dir = TempDir::new().map_err(Error::Io)?;
+        let local_results_path = local_temp_dir.path().join("results.json");
 
         self.scp_transfer
             .download_file(&results_path, &local_results_path)?;
@@ -175,6 +178,8 @@ impl RemoteOrchestrator {
         // Parse results JSON
         debug!("Parsing simulation results");
         let results_json = fs::read_to_string(&local_results_path).map_err(Error::Io)?;
+        // Drop local_temp_dir after reading
+        drop(local_temp_dir);
 
         let simulation_result: SimulationResult = serde_json::from_str(&results_json)
             .map_err(|e| Error::InvalidBinary(format!("Failed to parse results JSON: {}", e)))?;
@@ -212,21 +217,26 @@ impl RemoteOrchestrator {
         let mut tar = Builder::new(enc);
 
         // Add the directory contents to the archive
-        tar.append_dir_all("package", source_dir)
-            .map_err(|e| Error::Io(std::io::Error::other(format!("Failed to create tarball: {}", e))))?;
+        tar.append_dir_all("package", source_dir).map_err(|e| {
+            Error::Io(std::io::Error::other(format!(
+                "Failed to create tarball: {}",
+                e
+            )))
+        })?;
 
-        tar.finish()
-            .map_err(|e| Error::Io(std::io::Error::other(format!("Failed to finalize tarball: {}", e))))?;
+        tar.finish().map_err(|e| {
+            Error::Io(std::io::Error::other(format!(
+                "Failed to finalize tarball: {}",
+                e
+            )))
+        })?;
 
         Ok(())
     }
 
     /// Tests the connection to the remote machine.
     pub fn test_connection(&self) -> Result<()> {
-        info!(
-            "Testing connection to {}",
-            self.config.connection_string()
-        );
+        info!("Testing connection to {}", self.config.connection_string());
         self.ssh_executor.test_connection()
     }
 }

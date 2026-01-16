@@ -3,6 +3,8 @@
 //! This module provides functions to analyze and diagnose common remote
 //! execution failures, providing helpful error messages and suggestions.
 
+#![allow(dead_code)]
+
 use crate::error::Error;
 use log::debug;
 
@@ -37,7 +39,8 @@ pub fn diagnose_remote_execution_failure(
         || combined.contains("no such file")
         || exit_code == 127
     {
-        suggestions.push("• Snippex is not installed or not in PATH on the remote machine".to_string());
+        suggestions
+            .push("• Snippex is not installed or not in PATH on the remote machine".to_string());
         suggestions.push(format!(
             "• Install snippex on {} or update the snippex_path in your config",
             host
@@ -57,9 +60,11 @@ pub fn diagnose_remote_execution_failure(
         || combined.contains("binary file not found")
         || combined.contains("no such binary")
     {
-        suggestions.push("• The original binary file is not present on the remote machine".to_string());
+        suggestions
+            .push("• The original binary file is not present on the remote machine".to_string());
         suggestions.push("• Ensure the binary was correctly uploaded with the package".to_string());
-        suggestions.push("• Check that the binary path in the package metadata is correct".to_string());
+        suggestions
+            .push("• Check that the binary path in the package metadata is correct".to_string());
     }
     // Check for permission issues
     else if combined.contains("permission denied") || exit_code == 126 {
@@ -82,7 +87,8 @@ pub fn diagnose_remote_execution_failure(
         ));
     } else if combined.contains("sandbox") || combined.contains("memory allocation") {
         suggestions.push("• Simulation failed due to memory or sandbox issues".to_string());
-        suggestions.push("• The assembly block may be accessing invalid memory addresses".to_string());
+        suggestions
+            .push("• The assembly block may be accessing invalid memory addresses".to_string());
         suggestions.push("• Try extracting a different assembly block".to_string());
     }
     // Check for package/data issues
@@ -142,10 +148,7 @@ pub fn diagnose_remote_execution_failure(
 
 /// Extracts the command name from a full command string.
 fn extract_command_name(command: &str) -> &str {
-    command
-        .split_whitespace()
-        .next()
-        .unwrap_or(command)
+    command.split_whitespace().next().unwrap_or(command)
 }
 
 /// Indents each line of text by the specified number of spaces.

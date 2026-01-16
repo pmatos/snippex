@@ -1,5 +1,7 @@
 pub mod analyze;
+pub mod cache;
 pub mod compare;
+pub mod completions;
 pub mod config;
 pub mod export;
 pub mod extract;
@@ -9,3 +11,5 @@ pub mod list;
 pub mod remove;
 pub mod simulate;
 pub mod simulate_remote;
+pub mod validate;
+pub mod validate_batch;
