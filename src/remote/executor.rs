@@ -6,6 +6,7 @@
 
 use crate::config::RemoteConfig;
 use crate::error::{Error, Result};
+use crate::remote::retry::{diagnose_ssh_error, retry_with_backoff, RetryConfig};
 use log::{debug, info, warn};
 use ssh2::Session;
 use std::io::Read;
@@ -34,15 +35,27 @@ impl ExecutionResult {
 /// SSH executor for running commands on remote machines.
 pub struct SSHExecutor {
     config: RemoteConfig,
+    retry_config: RetryConfig,
 }
 
 impl SSHExecutor {
     /// Creates a new SSH executor with the given configuration.
     pub fn new(config: RemoteConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            retry_config: RetryConfig::default(),
+        }
     }
 
-    /// Establishes an SSH connection to the remote host.
+    /// Creates a new SSH executor with custom retry configuration.
+    pub fn with_retry_config(config: RemoteConfig, retry_config: RetryConfig) -> Self {
+        Self {
+            config,
+            retry_config,
+        }
+    }
+
+    /// Establishes an SSH connection to the remote host with automatic retry.
     ///
     /// # Returns
     ///
@@ -50,12 +63,42 @@ impl SSHExecutor {
     ///
     /// # Errors
     ///
-    /// Returns an error if:
-    /// - TCP connection fails
-    /// - SSH handshake fails
-    /// - Authentication fails
+    /// Returns an error with helpful diagnostics if:
+    /// - TCP connection fails (after retries)
+    /// - SSH handshake fails (after retries)
+    /// - Authentication fails (after retries)
     fn connect(&self) -> Result<Session> {
         info!("Connecting to {}:{}", self.config.host, self.config.port);
+
+        let connection_str = format!(
+            "SSH connection to {}:{}",
+            self.config.host, self.config.port
+        );
+
+        // Wrap connection attempt with retry logic
+        let result = retry_with_backoff(
+            &self.retry_config,
+            || self.connect_once(),
+            &connection_str,
+        );
+
+        // If connection failed after all retries, provide helpful diagnostics
+        if let Err(ref e) = result {
+            let diagnosis = diagnose_ssh_error(
+                e,
+                &self.config.host,
+                self.config.port,
+                self.config.ssh_key.as_deref(),
+            );
+            return Err(Error::InvalidBinary(diagnosis));
+        }
+
+        result
+    }
+
+    /// Attempts to establish an SSH connection once (without retry).
+    fn connect_once(&self) -> Result<Session> {
+        debug!("Attempting SSH connection to {}:{}", self.config.host, self.config.port);
 
         // Establish TCP connection with timeout
         let tcp = TcpStream::connect_timeout(
@@ -90,7 +133,7 @@ impl SSHExecutor {
         // Authenticate
         self.authenticate(&mut sess)?;
 
-        info!("SSH connection established successfully");
+        debug!("SSH connection attempt successful");
         Ok(sess)
     }
 

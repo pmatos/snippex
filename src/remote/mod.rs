@@ -8,6 +8,7 @@
 pub mod executor;
 pub mod orchestrator;
 pub mod package;
+pub mod retry;
 pub mod transfer;
 
 #[allow(unused_imports)]
@@ -16,5 +17,7 @@ pub use executor::{ExecutionResult, SSHExecutor};
 pub use orchestrator::RemoteOrchestrator;
 #[allow(unused_imports)]
 pub use package::{ExecutionPackage, PackageMetadata};
+#[allow(unused_imports)]
+pub use retry::{diagnose_ssh_error, retry_with_backoff, RetryConfig};
 #[allow(unused_imports)]
 pub use transfer::{SCPTransfer, TransferResult};

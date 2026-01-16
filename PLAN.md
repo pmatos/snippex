@@ -300,10 +300,10 @@ When results differ, clearly show what's wrong (specific register, flag, or memo
 
 ### 2.4 Error Handling & Resilience
 
-- [ ] Handle SSH connection failures:
-  - [ ] Retry with exponential backoff
-  - [ ] Fallback to local-only mode with warning
-  - [ ] Helpful error messages (check SSH keys, network, etc.)
+- [x] Handle SSH connection failures:
+  - [x] Retry with exponential backoff
+  - [x] Fallback to local-only mode with warning
+  - [x] Helpful error messages (check SSH keys, network, etc.)
 - [ ] Handle remote execution failures:
   - [ ] Binary not found on remote
   - [ ] Snippex not installed on remote
