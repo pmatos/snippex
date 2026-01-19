@@ -1,0 +1,67 @@
+# Dockerfile for x86_64 native testing environment
+# This image provides a reproducible environment for running snippex
+# with native x86_64 execution (ground truth for FEX-Emu comparisons)
+
+FROM ubuntu:22.04
+
+LABEL maintainer="snippex developers"
+LABEL description="x86_64 native testing environment for snippex"
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    # Build essentials
+    build-essential \
+    gcc \
+    g++ \
+    # Assembly tools
+    nasm \
+    # Linker and binary tools
+    binutils \
+    # Libraries for linking
+    libc6-dev \
+    # Git for fetching repos
+    git \
+    # Curl for rustup
+    curl \
+    # SSL certificates
+    ca-certificates \
+    # SQLite (for database operations)
+    libsqlite3-dev \
+    # pkg-config for build dependencies
+    pkg-config \
+    # Clean up
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust toolchain
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Verify Rust installation
+RUN rustc --version && cargo --version
+
+# Set working directory
+WORKDIR /snippex
+
+# Copy source code
+COPY . .
+
+# Build snippex in release mode
+RUN cargo build --release
+
+# Add release binary to PATH
+ENV PATH="/snippex/target/release:${PATH}"
+
+# Create directories for data
+RUN mkdir -p /data /samples
+
+# Default working directory for user operations
+WORKDIR /data
+
+# Verify snippex is working
+RUN snippex --version
+
+# Default command shows help
+CMD ["snippex", "--help"]

@@ -1,0 +1,102 @@
+# Docker Compose configuration for snippex testing environments
+#
+# Usage:
+#   docker-compose build              # Build all images
+#   docker-compose up -d              # Start all services
+#   docker-compose run x86-native     # Run x86 container interactively
+#   docker-compose run arm64-fex      # Run ARM64 container interactively
+#
+# For cross-testing workflow:
+#   1. Extract and simulate on x86-native (ground truth)
+#   2. Export results to shared volume
+#   3. Import and compare on arm64-fex (FEX-Emu testing)
+
+version: "3.8"
+
+services:
+  # x86_64 native testing environment
+  # Use this for extracting blocks and generating ground truth simulation results
+  x86-native:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.x86_64
+    image: snippex:x86_64
+    container_name: snippex-x86-native
+    hostname: snippex-x86
+    volumes:
+      # Shared data volume for database and exports
+      - snippex-data:/data
+      # Sample binaries for testing
+      - snippex-samples:/samples
+      # Mount local source for development (optional)
+      # - ..:/snippex:ro
+    working_dir: /data
+    # Keep container running for interactive use
+    tty: true
+    stdin_open: true
+    networks:
+      - snippex-net
+
+  # aarch64 FEX-Emu testing environment
+  # Use this for running FEX-Emu simulations and comparing against ground truth
+  arm64-fex:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.aarch64
+      platforms:
+        - linux/arm64
+    image: snippex:aarch64
+    container_name: snippex-arm64-fex
+    hostname: snippex-arm64
+    volumes:
+      # Shared data volume for database and exports
+      - snippex-data:/data
+      # Sample binaries for testing
+      - snippex-samples:/samples
+    working_dir: /data
+    # Keep container running for interactive use
+    tty: true
+    stdin_open: true
+    networks:
+      - snippex-net
+    # Environment variables for FEX-Emu configuration
+    environment:
+      - FEX_ROOTFS=/root/.fex-emu/RootFS
+
+  # SSH server for testing remote execution
+  # This simulates a remote ARM64 machine with FEX-Emu
+  ssh-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.aarch64
+      platforms:
+        - linux/arm64
+    image: snippex:aarch64-ssh
+    container_name: snippex-ssh-server
+    hostname: snippex-ssh
+    volumes:
+      - snippex-data:/data
+      - snippex-samples:/samples
+    working_dir: /data
+    networks:
+      - snippex-net
+    ports:
+      - "2222:22"
+    # Start SSH daemon (requires additional setup in Dockerfile)
+    command: /usr/sbin/sshd -D
+    environment:
+      - FEX_ROOTFS=/root/.fex-emu/RootFS
+
+# Shared volumes for data persistence
+volumes:
+  # Database and export files shared between containers
+  snippex-data:
+    driver: local
+  # Sample binaries for testing
+  snippex-samples:
+    driver: local
+
+# Network for inter-container communication
+networks:
+  snippex-net:
+    driver: bridge

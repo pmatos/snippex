@@ -1,0 +1,89 @@
+# Dockerfile for aarch64 FEX-Emu testing environment
+# This image provides a reproducible environment for running snippex
+# with FEX-Emu for x86_64 emulation on ARM64 hardware
+
+FROM ubuntu:22.04
+
+LABEL maintainer="snippex developers"
+LABEL description="aarch64 FEX-Emu testing environment for snippex"
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    # Build essentials
+    build-essential \
+    gcc \
+    g++ \
+    # Git for fetching repos
+    git \
+    # Curl for rustup and downloading
+    curl \
+    wget \
+    # SSL certificates
+    ca-certificates \
+    # SQLite (for database operations)
+    libsqlite3-dev \
+    # pkg-config for build dependencies
+    pkg-config \
+    # Required for FEX-Emu
+    cmake \
+    ninja-build \
+    libsdl2-dev \
+    libepoxy-dev \
+    libssl-dev \
+    python3 \
+    python3-pip \
+    squashfs-tools \
+    # SSH for remote execution testing
+    openssh-client \
+    # Clean up
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust toolchain (native aarch64)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Verify Rust installation
+RUN rustc --version && cargo --version
+
+# Install FEX-Emu from official PPA
+# Note: For production, you may want to pin to a specific version
+RUN apt-get update && apt-get install -y software-properties-common \
+    && add-apt-repository -y ppa:fex-emu/fex \
+    && apt-get update \
+    && apt-get install -y fex-emu-armv8.0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Download and set up x86_64 rootfs for FEX-Emu
+# This provides NASM, ld, and other x86_64 tools through FEX
+RUN mkdir -p /root/.fex-emu \
+    && FEXRootFSFetcher
+
+# Set working directory
+WORKDIR /snippex
+
+# Copy source code
+COPY . .
+
+# Build snippex in release mode (native aarch64 build)
+RUN cargo build --release
+
+# Add release binary to PATH
+ENV PATH="/snippex/target/release:${PATH}"
+
+# Create directories for data
+RUN mkdir -p /data /samples
+
+# Default working directory for user operations
+WORKDIR /data
+
+# Verify snippex is working
+RUN snippex --version
+
+# Verify FEX-Emu is available
+RUN FEXInterpreter --version || echo "FEX-Emu installed"
+
+# Default command shows help
+CMD ["snippex", "--help"]
