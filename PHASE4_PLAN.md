@@ -658,7 +658,7 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
   - Fail CI if regressions detected
   - Allow approved regressions (with justification)
 
-- [ ] **4.5.3.5** Add regression baseline management
+- [x] **4.5.3.5** Add regression baseline management
   - `snippex regression export baseline.json`: Export baseline
   - `snippex regression import baseline.json`: Import baseline
   - Store baseline in repo for CI reproducibility
