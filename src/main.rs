@@ -24,6 +24,7 @@ use cli::extract::ExtractCommand;
 use cli::import::ImportCommand;
 use cli::import_results::ImportResultsCommand;
 use cli::list::ListCommand;
+use cli::metrics::MetricsCommand;
 use cli::remove::RemoveCommand;
 use cli::report::ReportCommand;
 use cli::simulate::SimulateCommand;
@@ -96,6 +97,8 @@ enum Commands {
     Stats(StatsCommand),
     /// Create GitHub issues from validation failures
     Report(ReportCommand),
+    /// Track and display validation metrics over time
+    Metrics(MetricsCommand),
     /// Generate shell completion scripts
     Completions(CompletionsCommand),
 }
@@ -155,6 +158,7 @@ fn main() -> Result<()> {
         Commands::Cache(cmd) => cmd.execute(),
         Commands::Stats(cmd) => cmd.execute(),
         Commands::Report(cmd) => cmd.execute(),
+        Commands::Metrics(cmd) => cmd.execute(),
         Commands::Completions(cmd) => cmd.execute(),
     }
 }

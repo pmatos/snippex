@@ -513,7 +513,7 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
   - File: Database table or separate metrics file
   - Store: timestamp, block_count, pass_count, fail_count, avg_duration
 
-- [ ] **4.4.4.2** Create `snippex metrics` command
+- [x] **4.4.4.2** Create `snippex metrics` command
   - `snippex metrics record`: Record current validation state
   - `snippex metrics show`: Display metrics summary
   - `snippex metrics export`: Export to JSON/CSV
