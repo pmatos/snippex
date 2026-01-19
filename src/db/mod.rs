@@ -310,6 +310,84 @@ impl Database {
             [],
         )?;
 
+        // Regression testing baseline table - stores expected results for blocks
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS expected_results (
+                id INTEGER PRIMARY KEY,
+                extraction_id INTEGER NOT NULL,
+                block_hash TEXT NOT NULL,
+                expected_status TEXT NOT NULL,
+                expected_registers TEXT,
+                expected_flags INTEGER,
+                emulator_type TEXT,
+                last_verified DATETIME DEFAULT CURRENT_TIMESTAMP,
+                notes TEXT,
+                FOREIGN KEY (extraction_id) REFERENCES extractions(id),
+                UNIQUE(extraction_id, emulator_type)
+            )",
+            [],
+        )?;
+
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_expected_results_extraction ON expected_results(extraction_id)",
+            [],
+        )?;
+
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_expected_results_hash ON expected_results(block_hash)",
+            [],
+        )?;
+
+        // Regression test runs table - tracks each regression test execution
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS regression_runs (
+                id INTEGER PRIMARY KEY,
+                run_id TEXT NOT NULL UNIQUE,
+                started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                completed_at DATETIME,
+                total_blocks INTEGER NOT NULL DEFAULT 0,
+                pass_count INTEGER NOT NULL DEFAULT 0,
+                fail_count INTEGER NOT NULL DEFAULT 0,
+                new_pass_count INTEGER NOT NULL DEFAULT 0,
+                new_fail_count INTEGER NOT NULL DEFAULT 0,
+                emulator_type TEXT,
+                baseline_version TEXT,
+                notes TEXT
+            )",
+            [],
+        )?;
+
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_regression_runs_started ON regression_runs(started_at)",
+            [],
+        )?;
+
+        // Regression run details - individual block results for each run
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS regression_run_details (
+                id INTEGER PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                extraction_id INTEGER NOT NULL,
+                expected_status TEXT NOT NULL,
+                actual_status TEXT NOT NULL,
+                is_regression INTEGER NOT NULL DEFAULT 0,
+                is_improvement INTEGER NOT NULL DEFAULT 0,
+                error_message TEXT,
+                FOREIGN KEY (extraction_id) REFERENCES extractions(id)
+            )",
+            [],
+        )?;
+
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_regression_details_run ON regression_run_details(run_id)",
+            [],
+        )?;
+
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_regression_details_extraction ON regression_run_details(extraction_id)",
+            [],
+        )?;
+
         Ok(())
     }
 
@@ -1678,6 +1756,372 @@ impl Database {
 
         Ok(count as usize)
     }
+
+    // ========== Regression Testing Methods ==========
+
+    /// Records an expected result baseline for a block.
+    #[allow(dead_code)]
+    pub fn record_expected_result(
+        &mut self,
+        extraction_id: i64,
+        block_hash: &str,
+        expected_status: &str,
+        expected_registers: Option<&str>,
+        expected_flags: Option<i64>,
+        emulator_type: Option<&str>,
+        notes: Option<&str>,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO expected_results
+             (extraction_id, block_hash, expected_status, expected_registers,
+              expected_flags, emulator_type, last_verified, notes)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, CURRENT_TIMESTAMP, ?7)",
+            params![
+                extraction_id,
+                block_hash,
+                expected_status,
+                expected_registers,
+                expected_flags,
+                emulator_type,
+                notes,
+            ],
+        )?;
+
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Gets expected result for an extraction.
+    #[allow(dead_code)]
+    pub fn get_expected_result(
+        &self,
+        extraction_id: i64,
+        emulator_type: Option<&str>,
+    ) -> Result<Option<ExpectedResult>> {
+        let query = if emulator_type.is_some() {
+            "SELECT id, extraction_id, block_hash, expected_status, expected_registers,
+                    expected_flags, emulator_type, last_verified, notes
+             FROM expected_results
+             WHERE extraction_id = ?1 AND (emulator_type = ?2 OR emulator_type IS NULL)"
+        } else {
+            "SELECT id, extraction_id, block_hash, expected_status, expected_registers,
+                    expected_flags, emulator_type, last_verified, notes
+             FROM expected_results
+             WHERE extraction_id = ?1 AND emulator_type IS NULL"
+        };
+
+        let mut stmt = self.conn.prepare(query)?;
+
+        let result = if let Some(emu) = emulator_type {
+            stmt.query_row([extraction_id.to_string(), emu.to_string()], |row| {
+                Ok(ExpectedResult {
+                    id: row.get(0)?,
+                    extraction_id: row.get(1)?,
+                    block_hash: row.get(2)?,
+                    expected_status: row.get(3)?,
+                    expected_registers: row.get(4)?,
+                    expected_flags: row.get(5)?,
+                    emulator_type: row.get(6)?,
+                    last_verified: row.get(7)?,
+                    notes: row.get(8)?,
+                })
+            })
+        } else {
+            stmt.query_row([extraction_id.to_string()], |row| {
+                Ok(ExpectedResult {
+                    id: row.get(0)?,
+                    extraction_id: row.get(1)?,
+                    block_hash: row.get(2)?,
+                    expected_status: row.get(3)?,
+                    expected_registers: row.get(4)?,
+                    expected_flags: row.get(5)?,
+                    emulator_type: row.get(6)?,
+                    last_verified: row.get(7)?,
+                    notes: row.get(8)?,
+                })
+            })
+        };
+
+        match result {
+            Ok(r) => Ok(Some(r)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Gets all expected results (baseline).
+    #[allow(dead_code)]
+    pub fn get_all_expected_results(&self) -> Result<Vec<ExpectedResult>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, extraction_id, block_hash, expected_status, expected_registers,
+                    expected_flags, emulator_type, last_verified, notes
+             FROM expected_results
+             ORDER BY extraction_id",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(ExpectedResult {
+                id: row.get(0)?,
+                extraction_id: row.get(1)?,
+                block_hash: row.get(2)?,
+                expected_status: row.get(3)?,
+                expected_registers: row.get(4)?,
+                expected_flags: row.get(5)?,
+                emulator_type: row.get(6)?,
+                last_verified: row.get(7)?,
+                notes: row.get(8)?,
+            })
+        })?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+
+        Ok(results)
+    }
+
+    /// Starts a new regression test run.
+    #[allow(dead_code)]
+    pub fn start_regression_run(
+        &mut self,
+        run_id: &str,
+        emulator_type: Option<&str>,
+        baseline_version: Option<&str>,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO regression_runs (run_id, emulator_type, baseline_version)
+             VALUES (?1, ?2, ?3)",
+            params![run_id, emulator_type, baseline_version],
+        )?;
+
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Records a regression run detail.
+    #[allow(dead_code)]
+    pub fn record_regression_detail(
+        &mut self,
+        run_id: &str,
+        extraction_id: i64,
+        expected_status: &str,
+        actual_status: &str,
+        is_regression: bool,
+        is_improvement: bool,
+        error_message: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO regression_run_details
+             (run_id, extraction_id, expected_status, actual_status,
+              is_regression, is_improvement, error_message)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                run_id,
+                extraction_id,
+                expected_status,
+                actual_status,
+                is_regression as i32,
+                is_improvement as i32,
+                error_message,
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    /// Completes a regression run with summary stats.
+    #[allow(dead_code)]
+    pub fn complete_regression_run(
+        &mut self,
+        run_id: &str,
+        total_blocks: usize,
+        pass_count: usize,
+        fail_count: usize,
+        new_pass_count: usize,
+        new_fail_count: usize,
+        notes: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE regression_runs
+             SET completed_at = CURRENT_TIMESTAMP,
+                 total_blocks = ?2,
+                 pass_count = ?3,
+                 fail_count = ?4,
+                 new_pass_count = ?5,
+                 new_fail_count = ?6,
+                 notes = ?7
+             WHERE run_id = ?1",
+            params![
+                run_id,
+                total_blocks as i64,
+                pass_count as i64,
+                fail_count as i64,
+                new_pass_count as i64,
+                new_fail_count as i64,
+                notes,
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    /// Gets regression runs, ordered by most recent first.
+    #[allow(dead_code)]
+    pub fn get_regression_runs(&self, limit: usize) -> Result<Vec<RegressionRun>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, run_id, started_at, completed_at, total_blocks,
+                    pass_count, fail_count, new_pass_count, new_fail_count,
+                    emulator_type, baseline_version, notes
+             FROM regression_runs
+             ORDER BY started_at DESC
+             LIMIT ?1",
+        )?;
+
+        let rows = stmt.query_map([limit as i64], |row| {
+            Ok(RegressionRun {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                started_at: row.get(2)?,
+                completed_at: row.get(3)?,
+                total_blocks: row.get::<_, i64>(4)? as usize,
+                pass_count: row.get::<_, i64>(5)? as usize,
+                fail_count: row.get::<_, i64>(6)? as usize,
+                new_pass_count: row.get::<_, i64>(7)? as usize,
+                new_fail_count: row.get::<_, i64>(8)? as usize,
+                emulator_type: row.get(9)?,
+                baseline_version: row.get(10)?,
+                notes: row.get(11)?,
+            })
+        })?;
+
+        let mut runs = Vec::new();
+        for row in rows {
+            runs.push(row?);
+        }
+
+        Ok(runs)
+    }
+
+    /// Gets details for a specific regression run.
+    #[allow(dead_code)]
+    pub fn get_regression_run_details(&self, run_id: &str) -> Result<Vec<RegressionDetail>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, run_id, extraction_id, expected_status, actual_status,
+                    is_regression, is_improvement, error_message
+             FROM regression_run_details
+             WHERE run_id = ?1
+             ORDER BY is_regression DESC, is_improvement DESC, extraction_id",
+        )?;
+
+        let rows = stmt.query_map([run_id], |row| {
+            Ok(RegressionDetail {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                extraction_id: row.get(2)?,
+                expected_status: row.get(3)?,
+                actual_status: row.get(4)?,
+                is_regression: row.get::<_, i32>(5)? != 0,
+                is_improvement: row.get::<_, i32>(6)? != 0,
+                error_message: row.get(7)?,
+            })
+        })?;
+
+        let mut details = Vec::new();
+        for row in rows {
+            details.push(row?);
+        }
+
+        Ok(details)
+    }
+
+    /// Gets only regressions from a run.
+    #[allow(dead_code)]
+    pub fn get_regressions(&self, run_id: &str) -> Result<Vec<RegressionDetail>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, run_id, extraction_id, expected_status, actual_status,
+                    is_regression, is_improvement, error_message
+             FROM regression_run_details
+             WHERE run_id = ?1 AND is_regression = 1
+             ORDER BY extraction_id",
+        )?;
+
+        let rows = stmt.query_map([run_id], |row| {
+            Ok(RegressionDetail {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                extraction_id: row.get(2)?,
+                expected_status: row.get(3)?,
+                actual_status: row.get(4)?,
+                is_regression: true,
+                is_improvement: false,
+                error_message: row.get(7)?,
+            })
+        })?;
+
+        let mut details = Vec::new();
+        for row in rows {
+            details.push(row?);
+        }
+
+        Ok(details)
+    }
+
+    /// Gets only improvements from a run.
+    #[allow(dead_code)]
+    pub fn get_improvements(&self, run_id: &str) -> Result<Vec<RegressionDetail>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, run_id, extraction_id, expected_status, actual_status,
+                    is_regression, is_improvement, error_message
+             FROM regression_run_details
+             WHERE run_id = ?1 AND is_improvement = 1
+             ORDER BY extraction_id",
+        )?;
+
+        let rows = stmt.query_map([run_id], |row| {
+            Ok(RegressionDetail {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                extraction_id: row.get(2)?,
+                expected_status: row.get(3)?,
+                actual_status: row.get(4)?,
+                is_regression: false,
+                is_improvement: true,
+                error_message: row.get(7)?,
+            })
+        })?;
+
+        let mut details = Vec::new();
+        for row in rows {
+            details.push(row?);
+        }
+
+        Ok(details)
+    }
+
+    /// Clears expected results (baseline).
+    #[allow(dead_code)]
+    pub fn clear_expected_results(&mut self) -> Result<usize> {
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM expected_results", [], |row| {
+                row.get(0)
+            })?;
+
+        self.conn.execute("DELETE FROM expected_results", [])?;
+
+        Ok(count as usize)
+    }
+
+    /// Gets count of expected results.
+    #[allow(dead_code)]
+    pub fn get_expected_results_count(&self) -> Result<usize> {
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM expected_results", [], |row| {
+                row.get(0)
+            })?;
+
+        Ok(count as usize)
+    }
 }
 
 /// Cached validation result.
@@ -1818,4 +2262,48 @@ impl MetricsSnapshot {
             (self.fail_count as f64 / total as f64) * 100.0
         }
     }
+}
+
+/// Expected result baseline for regression testing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExpectedResult {
+    pub id: i64,
+    pub extraction_id: i64,
+    pub block_hash: String,
+    pub expected_status: String,
+    pub expected_registers: Option<String>,
+    pub expected_flags: Option<i64>,
+    pub emulator_type: Option<String>,
+    pub last_verified: String,
+    pub notes: Option<String>,
+}
+
+/// Regression test run summary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegressionRun {
+    pub id: i64,
+    pub run_id: String,
+    pub started_at: String,
+    pub completed_at: Option<String>,
+    pub total_blocks: usize,
+    pub pass_count: usize,
+    pub fail_count: usize,
+    pub new_pass_count: usize,
+    pub new_fail_count: usize,
+    pub emulator_type: Option<String>,
+    pub baseline_version: Option<String>,
+    pub notes: Option<String>,
+}
+
+/// Individual block result in a regression run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegressionDetail {
+    pub id: i64,
+    pub run_id: String,
+    pub extraction_id: i64,
+    pub expected_status: String,
+    pub actual_status: String,
+    pub is_regression: bool,
+    pub is_improvement: bool,
+    pub error_message: Option<String>,
 }

@@ -24,8 +24,8 @@ mod db_tests {
             .unwrap();
 
         assert_eq!(
-            tables_count, 8,
-            "Should have 8 tables (binaries, extractions, analyses, simulations, validation_cache, batch_runs, batch_run_details, metrics_snapshots)"
+            tables_count, 11,
+            "Should have 11 tables (binaries, extractions, analyses, simulations, validation_cache, batch_runs, batch_run_details, metrics_snapshots, expected_results, regression_runs, regression_run_details)"
         );
     }
 
