@@ -112,7 +112,7 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
   - Fall back to full transfer if rsync unavailable
   - Alternative: Use `zstd` compression for transfers
 
-- [ ] **4.1.3.4** Cache remote binary locations
+- [x] **4.1.3.4** Cache remote binary locations
   - Track: binary_hash -> remote_path mapping
   - Skip transfer entirely if binary already exists on remote
   - Add TTL for cache entries (7 days default)
