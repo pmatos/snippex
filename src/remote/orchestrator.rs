@@ -27,6 +27,7 @@ pub struct RemoteOrchestrator {
     scp_transfer: SCPTransfer,
     cleanup_registry: Option<CleanupRegistry>,
     connection_pool: Option<Arc<SSHConnectionPool>>,
+    use_transfer_cache: bool,
 }
 
 impl RemoteOrchestrator {
@@ -41,6 +42,7 @@ impl RemoteOrchestrator {
             scp_transfer,
             cleanup_registry: None,
             connection_pool: None,
+            use_transfer_cache: false,
         }
     }
 
@@ -55,6 +57,7 @@ impl RemoteOrchestrator {
             scp_transfer,
             cleanup_registry: Some(registry),
             connection_pool: None,
+            use_transfer_cache: false,
         }
     }
 
@@ -76,7 +79,21 @@ impl RemoteOrchestrator {
             scp_transfer,
             cleanup_registry,
             connection_pool: Some(pool),
+            use_transfer_cache: true, // Default to on for connection pool (batch operations)
         }
+    }
+
+    /// Enable or disable transfer cache for skipping redundant binary uploads.
+    ///
+    /// When enabled, the orchestrator will check if the binary already exists
+    /// on the remote machine with the correct hash before uploading.
+    pub fn set_use_transfer_cache(&mut self, use_cache: bool) {
+        self.use_transfer_cache = use_cache;
+    }
+
+    /// Returns whether transfer cache is enabled.
+    pub fn uses_transfer_cache(&self) -> bool {
+        self.use_transfer_cache
     }
 
     /// Executes a simulation package on the remote machine and retrieves results.

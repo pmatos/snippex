@@ -74,6 +74,13 @@ pub struct ValidateBatchCommand {
         help = "Number of worker threads (0 = CPU count)"
     )]
     pub threads: usize,
+
+    #[arg(
+        long,
+        default_value = "true",
+        help = "Use transfer cache to skip redundant binary uploads to remote (default: on for batch)"
+    )]
+    pub use_transfer_cache: bool,
 }
 
 /// Statistics for batch validation.

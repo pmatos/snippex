@@ -117,7 +117,7 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
   - Skip transfer entirely if binary already exists on remote
   - Add TTL for cache entries (7 days default)
 
-- [ ] **4.1.3.5** Add `--skip-cached-transfer` CLI option
+- [x] **4.1.3.5** Add `--skip-cached-transfer` CLI option
   - Enable optimization (default: on for batch, off for single)
 
 - [ ] **4.1.3.6** Write tests for incremental transfer

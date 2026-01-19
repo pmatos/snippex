@@ -50,6 +50,12 @@ pub struct ValidateCommand {
 
     #[arg(long, help = "Show flag-by-flag breakdown")]
     pub flag_detail: bool,
+
+    #[arg(
+        long,
+        help = "Use transfer cache to skip redundant binary uploads to remote (default: off for single validation)"
+    )]
+    pub use_transfer_cache: bool,
 }
 
 /// Represents the result of validating a block against both native and FEX-Emu.
