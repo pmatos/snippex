@@ -6,7 +6,9 @@ use std::path::PathBuf;
 
 use crate::config::Config;
 use crate::db::Database;
-use crate::export::github::{GitHubClient, GitHubConfig, IssueData, IssueTemplate, create_issue_template};
+use crate::export::github::{
+    create_issue_template, GitHubClient, GitHubConfig, IssueData, IssueTemplate,
+};
 use crate::export::{AnalysisData, HostInfo};
 use crate::simulator::{InitialState, SimulationResult};
 
@@ -144,14 +146,20 @@ impl GithubReportCommand {
         let rt = tokio::runtime::Runtime::new()
             .map_err(|e| anyhow!("Failed to create async runtime: {}", e))?;
 
-        let (created_issue, is_new) = rt.block_on(async {
-            client.create_or_update(&issue_data).await
-        }).map_err(|e| anyhow!("{}", e))?;
+        let (created_issue, is_new) = rt
+            .block_on(async { client.create_or_update(&issue_data).await })
+            .map_err(|e| anyhow!("{}", e))?;
 
         if is_new {
-            println!("✓ Created issue #{}: {}", created_issue.number, created_issue.url);
+            println!(
+                "✓ Created issue #{}: {}",
+                created_issue.number, created_issue.url
+            );
         } else {
-            println!("✓ Added comment to existing issue #{}: {}", created_issue.number, created_issue.url);
+            println!(
+                "✓ Added comment to existing issue #{}: {}",
+                created_issue.number, created_issue.url
+            );
         }
 
         Ok(())
@@ -166,7 +174,9 @@ impl GithubReportCommand {
         if end > extractions.len() {
             return Err(anyhow!(
                 "Batch range {}-{} exceeds available blocks (1-{})",
-                start, end, extractions.len()
+                start,
+                end,
+                extractions.len()
             ));
         }
 
@@ -196,7 +206,10 @@ impl GithubReportCommand {
 
         for block_number in start..=end {
             if issues_created >= self.max_issues {
-                println!("\nReached maximum issue limit ({}), stopping.", self.max_issues);
+                println!(
+                    "\nReached maximum issue limit ({}), stopping.",
+                    self.max_issues
+                );
                 break;
             }
 
@@ -217,13 +230,21 @@ impl GithubReportCommand {
                         println!("[{}] Would create: {}", block_number, template.title);
                         issues_created += 1;
                     } else if let Some((ref client_inner, ref rt)) = client {
-                        match rt.block_on(async { client_inner.create_or_update(&issue_data).await }) {
+                        match rt
+                            .block_on(async { client_inner.create_or_update(&issue_data).await })
+                        {
                             Ok((created_issue, is_new)) => {
                                 if is_new {
-                                    println!("[{}] ✓ Created #{}: {}", block_number, created_issue.number, created_issue.url);
+                                    println!(
+                                        "[{}] ✓ Created #{}: {}",
+                                        block_number, created_issue.number, created_issue.url
+                                    );
                                     issues_created += 1;
                                 } else {
-                                    println!("[{}] ✓ Updated #{}", block_number, created_issue.number);
+                                    println!(
+                                        "[{}] ✓ Updated #{}",
+                                        block_number, created_issue.number
+                                    );
                                     issues_updated += 1;
                                 }
                             }
@@ -268,12 +289,12 @@ impl GithubReportCommand {
             ));
         }
 
-        let start: usize = parts[0].parse().map_err(|_| {
-            anyhow!("Invalid start number '{}' in batch range", parts[0])
-        })?;
-        let end: usize = parts[1].parse().map_err(|_| {
-            anyhow!("Invalid end number '{}' in batch range", parts[1])
-        })?;
+        let start: usize = parts[0]
+            .parse()
+            .map_err(|_| anyhow!("Invalid start number '{}' in batch range", parts[0]))?;
+        let end: usize = parts[1]
+            .parse()
+            .map_err(|_| anyhow!("Invalid end number '{}' in batch range", parts[1]))?;
 
         if start == 0 {
             return Err(anyhow!("Batch start must be at least 1"));
@@ -281,7 +302,8 @@ impl GithubReportCommand {
         if start > end {
             return Err(anyhow!(
                 "Batch start ({}) must be less than or equal to end ({})",
-                start, end
+                start,
+                end
             ));
         }
 
@@ -296,11 +318,21 @@ impl GithubReportCommand {
     ) -> Result<IssueData> {
         let native_cached = db
             .get_validation_cache(extraction.id, "native", None, 365)?
-            .ok_or_else(|| anyhow!("No native validation result cached for block #{}", block_number))?;
+            .ok_or_else(|| {
+                anyhow!(
+                    "No native validation result cached for block #{}",
+                    block_number
+                )
+            })?;
 
         let fex_cached = db
             .get_validation_cache(extraction.id, "fex-emu", None, 365)?
-            .ok_or_else(|| anyhow!("No FEX-Emu validation result cached for block #{}", block_number))?;
+            .ok_or_else(|| {
+                anyhow!(
+                    "No FEX-Emu validation result cached for block #{}",
+                    block_number
+                )
+            })?;
 
         let analysis = db.load_block_analysis(extraction.id)?;
         let analysis_data = analysis.map(|a| AnalysisData::from(&a));

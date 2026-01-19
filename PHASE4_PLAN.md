@@ -631,7 +631,7 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
   - Table: `expected_results` (block_hash, expected_status, last_verified)
   - Table: `regression_runs` (run_id, timestamp, results)
 
-- [ ] **4.5.3.2** Implement `snippex regression` command
+- [x] **4.5.3.2** Implement `snippex regression` command
   - `snippex regression record`: Save current results as baseline
   - `snippex regression test`: Compare current vs baseline
   - `snippex regression update`: Update baseline with new results

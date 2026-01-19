@@ -25,6 +25,7 @@ use cli::import::ImportCommand;
 use cli::import_results::ImportResultsCommand;
 use cli::list::ListCommand;
 use cli::metrics::MetricsCommand;
+use cli::regression::RegressionCommand;
 use cli::remove::RemoveCommand;
 use cli::report::ReportCommand;
 use cli::simulate::SimulateCommand;
@@ -101,6 +102,8 @@ enum Commands {
     Metrics(MetricsCommand),
     /// Generate shell completion scripts
     Completions(CompletionsCommand),
+    /// Regression testing - track and detect behavior changes
+    Regression(RegressionCommand),
 }
 
 fn main() -> Result<()> {
@@ -160,5 +163,6 @@ fn main() -> Result<()> {
         Commands::Report(cmd) => cmd.execute(),
         Commands::Metrics(cmd) => cmd.execute(),
         Commands::Completions(cmd) => cmd.execute(),
+        Commands::Regression(cmd) => cmd.execute(),
     }
 }

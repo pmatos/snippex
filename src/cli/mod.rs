@@ -9,6 +9,7 @@ pub mod import;
 pub mod import_results;
 pub mod list;
 pub mod metrics;
+pub mod regression;
 pub mod remove;
 pub mod report;
 pub mod simulate;

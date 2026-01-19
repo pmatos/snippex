@@ -55,13 +55,20 @@ pub struct MetricsShowCommand {
     )]
     pub database: PathBuf,
 
-    #[arg(long, default_value = "10", help = "Number of recent snapshots to show")]
+    #[arg(
+        long,
+        default_value = "10",
+        help = "Number of recent snapshots to show"
+    )]
     pub limit: usize,
 
     #[arg(long, help = "Show detailed information including per-snapshot data")]
     pub detailed: bool,
 
-    #[arg(long, help = "Show trend analysis with improvement/regression detection")]
+    #[arg(
+        long,
+        help = "Show trend analysis with improvement/regression detection"
+    )]
     pub trends: bool,
 
     #[arg(
@@ -82,7 +89,11 @@ pub struct MetricsExportCommand {
     )]
     pub database: PathBuf,
 
-    #[arg(short, long, help = "Output file path (extension determines format: .json or .csv)")]
+    #[arg(
+        short,
+        long,
+        help = "Output file path (extension determines format: .json or .csv)"
+    )]
     pub output: PathBuf,
 
     #[arg(long, help = "Number of recent snapshots to export (default: all)")]
@@ -113,24 +124,13 @@ pub struct MetricsPrometheusCommand {
     )]
     pub database: PathBuf,
 
-    #[arg(
-        short,
-        long,
-        help = "Output file path (default: stdout)"
-    )]
+    #[arg(short, long, help = "Output file path (default: stdout)")]
     pub output: Option<PathBuf>,
 
-    #[arg(
-        long,
-        default_value = "snippex",
-        help = "Metric name prefix"
-    )]
+    #[arg(long, default_value = "snippex", help = "Metric name prefix")]
     pub prefix: String,
 
-    #[arg(
-        long,
-        help = "Include help text for each metric"
-    )]
+    #[arg(long, help = "Include help text for each metric")]
     pub with_help: bool,
 }
 
@@ -220,21 +220,29 @@ impl MetricsShowCommand {
         let latest = &snapshots[0];
         println!("Latest Snapshot: {}", latest.recorded_at);
         println!("  Total Blocks:     {}", latest.total_blocks);
-        println!("  Analyzed:         {} ({:.1}%)",
+        println!(
+            "  Analyzed:         {} ({:.1}%)",
             latest.analyzed_blocks,
             if latest.total_blocks > 0 {
                 (latest.analyzed_blocks as f64 / latest.total_blocks as f64) * 100.0
-            } else { 0.0 }
+            } else {
+                0.0
+            }
         );
-        println!("  Validated:        {} ({:.1}%)",
+        println!(
+            "  Validated:        {} ({:.1}%)",
             latest.validated_blocks,
             if latest.total_blocks > 0 {
                 (latest.validated_blocks as f64 / latest.total_blocks as f64) * 100.0
-            } else { 0.0 }
+            } else {
+                0.0
+            }
         );
         println!();
-        println!("  Pass: {} | Fail: {} | Skip: {}",
-            latest.pass_count, latest.fail_count, latest.skip_count);
+        println!(
+            "  Pass: {} | Fail: {} | Skip: {}",
+            latest.pass_count, latest.fail_count, latest.skip_count
+        );
         println!("  Pass Rate: {:.1}%", latest.pass_rate());
         println!();
 
@@ -251,7 +259,11 @@ impl MetricsShowCommand {
                 let empty = "░".repeat(max_bar_width - bar_len);
 
                 // Parse date to show shorter version
-                let date_short = snapshot.recorded_at.split(' ').next().unwrap_or(&snapshot.recorded_at);
+                let date_short = snapshot
+                    .recorded_at
+                    .split(' ')
+                    .next()
+                    .unwrap_or(&snapshot.recorded_at);
                 println!("  {} |{}{}| {:5.1}%", date_short, bar, empty, rate);
             }
             println!();
@@ -263,16 +275,23 @@ impl MetricsShowCommand {
         }
 
         if self.detailed {
-            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            println!(
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            );
             println!("Detailed Snapshot History");
-            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            println!(
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            );
             println!();
-            println!("{:4} {:20} {:>7} {:>7} {:>7} {:>5} {:>5} {:>5} {:>7}",
-                "ID", "Timestamp", "Total", "Analyz", "Valid", "Pass", "Fail", "Skip", "Rate");
+            println!(
+                "{:4} {:20} {:>7} {:>7} {:>7} {:>5} {:>5} {:>5} {:>7}",
+                "ID", "Timestamp", "Total", "Analyz", "Valid", "Pass", "Fail", "Skip", "Rate"
+            );
             println!("{}", "─".repeat(78));
 
             for s in &snapshots {
-                println!("{:4} {:20} {:>7} {:>7} {:>7} {:>5} {:>5} {:>5} {:>6.1}%",
+                println!(
+                    "{:4} {:20} {:>7} {:>7} {:>7} {:>5} {:>5} {:>5} {:>6.1}%",
                     s.id,
                     &s.recorded_at[..20.min(s.recorded_at.len())],
                     s.total_blocks,
@@ -320,18 +339,30 @@ impl MetricsShowCommand {
 
         println!("Overall Trend: {}", trend_icon);
         println!();
-        println!("  Pass Rate Change:   {:+.1} percentage points", pass_rate_change);
-        println!("    from {:.1}% to {:.1}%", oldest.pass_rate(), latest.pass_rate());
+        println!(
+            "  Pass Rate Change:   {:+.1} percentage points",
+            pass_rate_change
+        );
+        println!(
+            "    from {:.1}% to {:.1}%",
+            oldest.pass_rate(),
+            latest.pass_rate()
+        );
         println!();
         println!("  Block Count Change: {:+}", total_blocks_change);
-        println!("    from {} to {}", oldest.total_blocks, latest.total_blocks);
+        println!(
+            "    from {} to {}",
+            oldest.total_blocks, latest.total_blocks
+        );
         println!();
 
         // Calculate average improvement per snapshot
         if snapshots.len() > 2 {
-            let avg_change: f64 = snapshots.windows(2)
+            let avg_change: f64 = snapshots
+                .windows(2)
                 .map(|w| w[0].pass_rate() - w[1].pass_rate())
-                .sum::<f64>() / (snapshots.len() - 1) as f64;
+                .sum::<f64>()
+                / (snapshots.len() - 1) as f64;
             println!("  Average Change:     {:+.2}% per snapshot", avg_change);
             println!();
         }
@@ -350,7 +381,11 @@ impl MetricsShowCommand {
         if !regressions.is_empty() {
             println!("⚠️  Significant Regressions Detected:");
             for (date, change) in regressions.iter().take(5) {
-                println!("    {} ({:.1}% drop)", date.split(' ').next().unwrap_or(date), change.abs());
+                println!(
+                    "    {} ({:.1}% drop)",
+                    date.split(' ').next().unwrap_or(date),
+                    change.abs()
+                );
             }
             if regressions.len() > 5 {
                 println!("    ... and {} more", regressions.len() - 5);
@@ -372,7 +407,11 @@ impl MetricsShowCommand {
         if !improvements.is_empty() {
             println!("✅ Significant Improvements:");
             for (date, change) in improvements.iter().take(5) {
-                println!("    {} (+{:.1}% gain)", date.split(' ').next().unwrap_or(date), change);
+                println!(
+                    "    {} (+{:.1}% gain)",
+                    date.split(' ').next().unwrap_or(date),
+                    change
+                );
             }
             if improvements.len() > 5 {
                 println!("    ... and {} more", improvements.len() - 5);
@@ -384,8 +423,15 @@ impl MetricsShowCommand {
         if snapshots.len() >= 2 {
             let recent_change = latest.pass_rate() - snapshots[1].pass_rate();
             if recent_change < -self.alert_threshold {
-                println!("🚨 ALERT: Pass rate dropped by {:.1}% in the most recent snapshot!", recent_change.abs());
-                println!("   Previous: {:.1}% | Current: {:.1}%", snapshots[1].pass_rate(), latest.pass_rate());
+                println!(
+                    "🚨 ALERT: Pass rate dropped by {:.1}% in the most recent snapshot!",
+                    recent_change.abs()
+                );
+                println!(
+                    "   Previous: {:.1}% | Current: {:.1}%",
+                    snapshots[1].pass_rate(),
+                    latest.pass_rate()
+                );
                 println!();
             }
         }
@@ -415,7 +461,9 @@ impl MetricsExportCommand {
             ));
         }
 
-        let extension = self.output.extension()
+        let extension = self
+            .output
+            .extension()
             .and_then(|e| e.to_str())
             .map(|e| e.to_lowercase());
 
@@ -432,7 +480,11 @@ impl MetricsExportCommand {
             }
         }
 
-        println!("Exported {} snapshots to {}", snapshots.len(), self.output.display());
+        println!(
+            "Exported {} snapshots to {}",
+            snapshots.len(),
+            self.output.display()
+        );
         Ok(())
     }
 
@@ -454,8 +506,9 @@ impl MetricsExportCommand {
             notes: Option<String>,
         }
 
-        let export_data: Vec<ExportSnapshot> = snapshots.iter().map(|s| {
-            ExportSnapshot {
+        let export_data: Vec<ExportSnapshot> = snapshots
+            .iter()
+            .map(|s| ExportSnapshot {
                 id: s.id,
                 recorded_at: s.recorded_at.clone(),
                 total_blocks: s.total_blocks,
@@ -467,8 +520,8 @@ impl MetricsExportCommand {
                 pass_rate: s.pass_rate(),
                 avg_duration_ns: s.avg_duration_ns,
                 notes: s.notes.clone(),
-            }
-        }).collect();
+            })
+            .collect();
 
         let json = serde_json::to_string_pretty(&export_data)?;
         let mut file = File::create(&self.output)?;
@@ -484,7 +537,9 @@ impl MetricsExportCommand {
 
         // Write data rows
         for s in snapshots {
-            writeln!(file, "{},{},{},{},{},{},{},{},{:.2},{},\"{}\"",
+            writeln!(
+                file,
+                "{},{},{},{},{},{},{},{},{:.2},{},\"{}\"",
                 s.id,
                 s.recorded_at,
                 s.total_blocks,
@@ -581,7 +636,10 @@ impl MetricsPrometheusCommand {
 
         // Add help text if requested
         if self.with_help {
-            output.push_str(&format!("# HELP {}_total_blocks Total number of extracted assembly blocks\n", prefix));
+            output.push_str(&format!(
+                "# HELP {}_total_blocks Total number of extracted assembly blocks\n",
+                prefix
+            ));
             output.push_str(&format!("# TYPE {}_total_blocks gauge\n", prefix));
         }
         if let Some(s) = snapshot {
@@ -591,73 +649,125 @@ impl MetricsPrometheusCommand {
         }
 
         if self.with_help {
-            output.push_str(&format!("# HELP {}_analyzed_blocks Number of blocks that have been analyzed\n", prefix));
+            output.push_str(&format!(
+                "# HELP {}_analyzed_blocks Number of blocks that have been analyzed\n",
+                prefix
+            ));
             output.push_str(&format!("# TYPE {}_analyzed_blocks gauge\n", prefix));
         }
         if let Some(s) = snapshot {
-            output.push_str(&format!("{}_analyzed_blocks {}\n", prefix, s.analyzed_blocks));
+            output.push_str(&format!(
+                "{}_analyzed_blocks {}\n",
+                prefix, s.analyzed_blocks
+            ));
         } else {
             output.push_str(&format!("{}_analyzed_blocks 0\n", prefix));
         }
 
         if self.with_help {
-            output.push_str(&format!("# HELP {}_validated_blocks Number of blocks that have been validated\n", prefix));
+            output.push_str(&format!(
+                "# HELP {}_validated_blocks Number of blocks that have been validated\n",
+                prefix
+            ));
             output.push_str(&format!("# TYPE {}_validated_blocks gauge\n", prefix));
         }
         if let Some(s) = snapshot {
-            output.push_str(&format!("{}_validated_blocks {}\n", prefix, s.validated_blocks));
+            output.push_str(&format!(
+                "{}_validated_blocks {}\n",
+                prefix, s.validated_blocks
+            ));
         } else {
             output.push_str(&format!("{}_validated_blocks 0\n", prefix));
         }
 
         if self.with_help {
-            output.push_str(&format!("# HELP {}_validation_pass_total Total number of passed validations\n", prefix));
-            output.push_str(&format!("# TYPE {}_validation_pass_total counter\n", prefix));
+            output.push_str(&format!(
+                "# HELP {}_validation_pass_total Total number of passed validations\n",
+                prefix
+            ));
+            output.push_str(&format!(
+                "# TYPE {}_validation_pass_total counter\n",
+                prefix
+            ));
         }
         if let Some(s) = snapshot {
-            output.push_str(&format!("{}_validation_pass_total {}\n", prefix, s.pass_count));
+            output.push_str(&format!(
+                "{}_validation_pass_total {}\n",
+                prefix, s.pass_count
+            ));
         } else {
             output.push_str(&format!("{}_validation_pass_total 0\n", prefix));
         }
 
         if self.with_help {
-            output.push_str(&format!("# HELP {}_validation_fail_total Total number of failed validations\n", prefix));
-            output.push_str(&format!("# TYPE {}_validation_fail_total counter\n", prefix));
+            output.push_str(&format!(
+                "# HELP {}_validation_fail_total Total number of failed validations\n",
+                prefix
+            ));
+            output.push_str(&format!(
+                "# TYPE {}_validation_fail_total counter\n",
+                prefix
+            ));
         }
         if let Some(s) = snapshot {
-            output.push_str(&format!("{}_validation_fail_total {}\n", prefix, s.fail_count));
+            output.push_str(&format!(
+                "{}_validation_fail_total {}\n",
+                prefix, s.fail_count
+            ));
         } else {
             output.push_str(&format!("{}_validation_fail_total 0\n", prefix));
         }
 
         if self.with_help {
-            output.push_str(&format!("# HELP {}_validation_skip_total Total number of skipped validations\n", prefix));
-            output.push_str(&format!("# TYPE {}_validation_skip_total counter\n", prefix));
+            output.push_str(&format!(
+                "# HELP {}_validation_skip_total Total number of skipped validations\n",
+                prefix
+            ));
+            output.push_str(&format!(
+                "# TYPE {}_validation_skip_total counter\n",
+                prefix
+            ));
         }
         if let Some(s) = snapshot {
-            output.push_str(&format!("{}_validation_skip_total {}\n", prefix, s.skip_count));
+            output.push_str(&format!(
+                "{}_validation_skip_total {}\n",
+                prefix, s.skip_count
+            ));
         } else {
             output.push_str(&format!("{}_validation_skip_total 0\n", prefix));
         }
 
         if self.with_help {
-            output.push_str(&format!("# HELP {}_validation_pass_rate Percentage of validations that passed\n", prefix));
+            output.push_str(&format!(
+                "# HELP {}_validation_pass_rate Percentage of validations that passed\n",
+                prefix
+            ));
             output.push_str(&format!("# TYPE {}_validation_pass_rate gauge\n", prefix));
         }
         if let Some(s) = snapshot {
-            output.push_str(&format!("{}_validation_pass_rate {:.2}\n", prefix, s.pass_rate()));
+            output.push_str(&format!(
+                "{}_validation_pass_rate {:.2}\n",
+                prefix,
+                s.pass_rate()
+            ));
         } else {
             output.push_str(&format!("{}_validation_pass_rate 0\n", prefix));
         }
 
         if self.with_help {
             output.push_str(&format!("# HELP {}_avg_validation_duration_seconds Average validation duration in seconds\n", prefix));
-            output.push_str(&format!("# TYPE {}_avg_validation_duration_seconds gauge\n", prefix));
+            output.push_str(&format!(
+                "# TYPE {}_avg_validation_duration_seconds gauge\n",
+                prefix
+            ));
         }
         if let Some(s) = snapshot {
             if let Some(duration_ns) = s.avg_duration_ns {
                 let duration_secs = duration_ns as f64 / 1_000_000_000.0;
-                output.push_str(&format!("{}_avg_validation_duration_seconds {:.6}\n", prefix, duration_secs));
+                output.push_str(&format!(
+                    "{}_avg_validation_duration_seconds {:.6}\n",
+                    prefix, duration_secs
+                ));
             } else {
                 output.push_str(&format!("{}_avg_validation_duration_seconds 0\n", prefix));
             }
@@ -666,13 +776,25 @@ impl MetricsPrometheusCommand {
         }
 
         if self.with_help {
-            output.push_str(&format!("# HELP {}_last_snapshot_timestamp Unix timestamp of the last metrics snapshot\n", prefix));
-            output.push_str(&format!("# TYPE {}_last_snapshot_timestamp gauge\n", prefix));
+            output.push_str(&format!(
+                "# HELP {}_last_snapshot_timestamp Unix timestamp of the last metrics snapshot\n",
+                prefix
+            ));
+            output.push_str(&format!(
+                "# TYPE {}_last_snapshot_timestamp gauge\n",
+                prefix
+            ));
         }
         if let Some(s) = snapshot {
             // Parse timestamp and convert to Unix time
-            if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(&s.recorded_at, "%Y-%m-%d %H:%M:%S") {
-                output.push_str(&format!("{}_last_snapshot_timestamp {}\n", prefix, dt.and_utc().timestamp()));
+            if let Ok(dt) =
+                chrono::NaiveDateTime::parse_from_str(&s.recorded_at, "%Y-%m-%d %H:%M:%S")
+            {
+                output.push_str(&format!(
+                    "{}_last_snapshot_timestamp {}\n",
+                    prefix,
+                    dt.and_utc().timestamp()
+                ));
             } else {
                 output.push_str(&format!("{}_last_snapshot_timestamp 0\n", prefix));
             }

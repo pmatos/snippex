@@ -1432,6 +1432,31 @@ impl Database {
         Ok(runs)
     }
 
+    /// Gets details for a specific batch run.
+    pub fn get_batch_run_details(&self, batch_id: i64) -> Result<Vec<BatchRunDetail>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, batch_id, extraction_id, status, duration_ns, error_message
+             FROM batch_run_details
+             WHERE batch_id = ?1
+             ORDER BY extraction_id",
+        )?;
+
+        let details = stmt
+            .query_map(params![batch_id], |row| {
+                Ok(BatchRunDetail {
+                    id: row.get(0)?,
+                    batch_id: row.get(1)?,
+                    extraction_id: row.get(2)?,
+                    status: row.get(3)?,
+                    duration_ns: row.get::<_, Option<i64>>(4)?.map(|d| d as u64),
+                    error_message: row.get(5)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(details)
+    }
+
     /// Gets pass rate trends over time (by day).
     pub fn get_pass_rate_trends(&self, days: usize) -> Result<Vec<DailyStats>> {
         let mut stmt = self.conn.prepare(
@@ -1598,9 +1623,9 @@ impl Database {
     #[allow(dead_code)]
     pub fn record_metrics_snapshot(&mut self, notes: Option<&str>) -> Result<i64> {
         // Count total extractions
-        let total_blocks: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM extractions", [], |row| row.get(0))?;
+        let total_blocks: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM extractions", [], |row| row.get(0))?;
 
         // Count analyzed blocks
         let analyzed_blocks: i64 = self.conn.query_row(
@@ -1746,11 +1771,11 @@ impl Database {
     /// Deletes all metrics snapshots.
     #[allow(dead_code)]
     pub fn clear_metrics_snapshots(&mut self) -> Result<usize> {
-        let count: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM metrics_snapshots", [], |row| {
-                row.get(0)
-            })?;
+        let count: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM metrics_snapshots", [], |row| {
+                    row.get(0)
+                })?;
 
         self.conn.execute("DELETE FROM metrics_snapshots", [])?;
 
@@ -1760,7 +1785,7 @@ impl Database {
     // ========== Regression Testing Methods ==========
 
     /// Records an expected result baseline for a block.
-    #[allow(dead_code)]
+    #[allow(dead_code, clippy::too_many_arguments)]
     pub fn record_expected_result(
         &mut self,
         extraction_id: i64,
@@ -1898,7 +1923,7 @@ impl Database {
     }
 
     /// Records a regression run detail.
-    #[allow(dead_code)]
+    #[allow(dead_code, clippy::too_many_arguments)]
     pub fn record_regression_detail(
         &mut self,
         run_id: &str,
@@ -1929,7 +1954,7 @@ impl Database {
     }
 
     /// Completes a regression run with summary stats.
-    #[allow(dead_code)]
+    #[allow(dead_code, clippy::too_many_arguments)]
     pub fn complete_regression_run(
         &mut self,
         run_id: &str,
@@ -2100,11 +2125,11 @@ impl Database {
     /// Clears expected results (baseline).
     #[allow(dead_code)]
     pub fn clear_expected_results(&mut self) -> Result<usize> {
-        let count: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM expected_results", [], |row| {
-                row.get(0)
-            })?;
+        let count: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM expected_results", [], |row| {
+                    row.get(0)
+                })?;
 
         self.conn.execute("DELETE FROM expected_results", [])?;
 
@@ -2114,11 +2139,11 @@ impl Database {
     /// Gets count of expected results.
     #[allow(dead_code)]
     pub fn get_expected_results_count(&self) -> Result<usize> {
-        let count: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM expected_results", [], |row| {
-                row.get(0)
-            })?;
+        let count: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM expected_results", [], |row| {
+                    row.get(0)
+                })?;
 
         Ok(count as usize)
     }
@@ -2225,6 +2250,18 @@ pub struct FlakyBlockInfo {
 pub struct FailureModeInfo {
     pub mode: String,
     pub count: usize,
+}
+
+/// Individual block result in a batch run.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct BatchRunDetail {
+    pub id: i64,
+    pub batch_id: i64,
+    pub extraction_id: i64,
+    pub status: String,
+    pub duration_ns: Option<u64>,
+    pub error_message: Option<String>,
 }
 
 /// A snapshot of validation metrics at a point in time.

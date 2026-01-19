@@ -157,7 +157,10 @@ impl GitHubClient {
     /// # Returns
     ///
     /// A list of matching issue numbers and URLs.
-    pub async fn find_issues_by_signature(&self, signature: &str) -> Result<Vec<(u64, String)>, String> {
+    pub async fn find_issues_by_signature(
+        &self,
+        signature: &str,
+    ) -> Result<Vec<(u64, String)>, String> {
         let token = self.get_token()?;
 
         // Parse repository
@@ -176,7 +179,10 @@ impl GitHubClient {
             .map_err(|e| format!("Failed to create GitHub client: {}", e))?;
 
         // Search for issues containing the signature
-        let query = format!("repo:{} \"Issue signature: `{}`\" in:body", self.config.repository, signature);
+        let query = format!(
+            "repo:{} \"Issue signature: `{}`\" in:body",
+            self.config.repository, signature
+        );
 
         let results = octocrab
             .search()
@@ -260,9 +266,7 @@ impl GitHubClient {
                  - OS: {}\n\
                  - Kernel: {}\n\n\
                  *Detected by snippex*",
-                data.host_info.architecture,
-                data.host_info.os,
-                data.host_info.kernel
+                data.host_info.architecture, data.host_info.os, data.host_info.kernel
             );
 
             self.add_comment(*number, &comment).await?;
@@ -306,7 +310,11 @@ pub fn generate_issue_title(extraction: &ExtractionInfo, differences: &[String])
     } else if differences.len() <= 3 {
         differences.join(", ")
     } else {
-        format!("{} and {} more differences", differences[0], differences.len() - 1)
+        format!(
+            "{} and {} more differences",
+            differences[0],
+            differences.len() - 1
+        )
     };
 
     format!(
@@ -326,7 +334,8 @@ pub fn build_issue_body(data: &IssueData) -> String {
         body,
         "Snippex detected a validation failure when comparing native x86 execution \
         against FEX-Emu emulation for an assembly block."
-    ).unwrap();
+    )
+    .unwrap();
     writeln!(body).unwrap();
 
     // Block Information
@@ -339,8 +348,14 @@ pub fn build_issue_body(data: &IssueData) -> String {
         body,
         "| Address Range | `0x{:016x}` - `0x{:016x}` |",
         data.extraction.start_address, data.extraction.end_address
-    ).unwrap();
-    writeln!(body, "| Block Size | {} bytes |", data.extraction.assembly_block.len()).unwrap();
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "| Block Size | {} bytes |",
+        data.extraction.assembly_block.len()
+    )
+    .unwrap();
     if let Some(ref analysis) = data.analysis {
         writeln!(body, "| Instructions | {} |", analysis.instructions_count).unwrap();
     }
@@ -382,7 +397,12 @@ pub fn build_issue_body(data: &IssueData) -> String {
         writeln!(body, "| Register | Native | FEX-Emu |").unwrap();
         writeln!(body, "|----------|--------|---------|").unwrap();
         for (reg, native_val, fex_val) in &reg_diffs {
-            writeln!(body, "| {} | `0x{:016x}` | `0x{:016x}` |", reg, native_val, fex_val).unwrap();
+            writeln!(
+                body,
+                "| {} | `0x{:016x}` | `0x{:016x}` |",
+                reg, native_val, fex_val
+            )
+            .unwrap();
         }
     }
     writeln!(body).unwrap();
@@ -401,7 +421,8 @@ pub fn build_issue_body(data: &IssueData) -> String {
             body,
             "| RFLAGS | `0x{:016x}` | `0x{:016x}` |",
             native_flags, fex_flags
-        ).unwrap();
+        )
+        .unwrap();
         write_flag_breakdown(&mut body, native_flags, fex_flags);
     }
     writeln!(body).unwrap();
@@ -413,7 +434,12 @@ pub fn build_issue_body(data: &IssueData) -> String {
     if mem_diffs.is_empty() {
         writeln!(body, "No memory differences detected.").unwrap();
     } else {
-        writeln!(body, "Found {} memory region(s) with differences.", mem_diffs.len()).unwrap();
+        writeln!(
+            body,
+            "Found {} memory region(s) with differences.",
+            mem_diffs.len()
+        )
+        .unwrap();
         writeln!(body).unwrap();
         for (addr, native_bytes, fex_bytes) in &mem_diffs {
             writeln!(body, "**Address `0x{:016x}`:**", addr).unwrap();
@@ -429,8 +455,16 @@ pub fn build_issue_body(data: &IssueData) -> String {
     writeln!(body, "<details>").unwrap();
     writeln!(body, "<summary>Click to expand initial state</summary>").unwrap();
     writeln!(body).unwrap();
-    write_state_section(&mut body, "Initial Registers", &data.native_result.initial_state.registers);
-    write_memory_section(&mut body, "Initial Memory", &data.native_result.initial_state.memory_locations);
+    write_state_section(
+        &mut body,
+        "Initial Registers",
+        &data.native_result.initial_state.registers,
+    );
+    write_memory_section(
+        &mut body,
+        "Initial Memory",
+        &data.native_result.initial_state.memory_locations,
+    );
     writeln!(body, "</details>").unwrap();
     writeln!(body).unwrap();
 
@@ -441,7 +475,11 @@ pub fn build_issue_body(data: &IssueData) -> String {
     writeln!(body).unwrap();
     writeln!(body, "1. Extract the block from the database:").unwrap();
     writeln!(body, "   ```bash").unwrap();
-    writeln!(body, "   snippex show --id <extraction_id> --format nasm > block.asm").unwrap();
+    writeln!(
+        body,
+        "   snippex show --id <extraction_id> --format nasm > block.asm"
+    )
+    .unwrap();
     writeln!(body, "   ```").unwrap();
     writeln!(body).unwrap();
     writeln!(body, "2. Run native simulation:").unwrap();
@@ -451,7 +489,11 @@ pub fn build_issue_body(data: &IssueData) -> String {
     writeln!(body).unwrap();
     writeln!(body, "3. Run FEX-Emu simulation:").unwrap();
     writeln!(body, "   ```bash").unwrap();
-    writeln!(body, "   snippex simulate --id <extraction_id> --emulator fex").unwrap();
+    writeln!(
+        body,
+        "   snippex simulate --id <extraction_id> --emulator fex"
+    )
+    .unwrap();
     writeln!(body, "   ```").unwrap();
     writeln!(body).unwrap();
 
@@ -559,7 +601,11 @@ fn find_memory_differences(
 }
 
 fn bytes_to_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{:02x}", b)).collect::<Vec<_>>().join(" ")
+    bytes
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn write_state_section(output: &mut String, title: &str, registers: &HashMap<String, u64>) {
@@ -614,7 +660,12 @@ fn write_flag_breakdown(output: &mut String, native: u64, fex: u64) {
         let native_bit = (native >> bit) & 1;
         let fex_bit = (fex >> bit) & 1;
         if native_bit != fex_bit {
-            writeln!(output, "- **{}**: Native={}, FEX-Emu={}", name, native_bit, fex_bit).unwrap();
+            writeln!(
+                output,
+                "- **{}**: Native={}, FEX-Emu={}",
+                name, native_bit, fex_bit
+            )
+            .unwrap();
         }
     }
 }
