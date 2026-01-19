@@ -25,6 +25,7 @@ use cli::import::ImportCommand;
 use cli::import_results::ImportResultsCommand;
 use cli::list::ListCommand;
 use cli::remove::RemoveCommand;
+use cli::report::ReportCommand;
 use cli::simulate::SimulateCommand;
 use cli::simulate_remote::SimulateRemoteCommand;
 use cli::stats::StatsCommand;
@@ -93,6 +94,8 @@ enum Commands {
     Config(ConfigCommand),
     Cache(CacheCommand),
     Stats(StatsCommand),
+    /// Create GitHub issues from validation failures
+    Report(ReportCommand),
     /// Generate shell completion scripts
     Completions(CompletionsCommand),
 }
@@ -151,6 +154,7 @@ fn main() -> Result<()> {
         Commands::Config(cmd) => cmd.execute(),
         Commands::Cache(cmd) => cmd.execute(),
         Commands::Stats(cmd) => cmd.execute(),
+        Commands::Report(cmd) => cmd.execute(),
         Commands::Completions(cmd) => cmd.execute(),
     }
 }
