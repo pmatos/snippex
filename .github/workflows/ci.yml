@@ -1,89 +1,196 @@
+# Main CI workflow for snippex
+# Runs on every push and pull request
+#
+# Jobs:
+#   - lint: Code formatting and clippy checks
+#   - test: Unit and integration tests
+#   - build: Release builds
+#   - coverage: Test coverage reporting
+
 name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
 
 jobs:
+  # Code formatting and linting
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "lint"
+          prefix-key: "v2"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  # Unit and integration tests
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcapstone-dev nasm
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "test"
+          cache-all-crates: true
+          prefix-key: "v2"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Run unit tests
+        run: cargo test --lib --bins
+
+      - name: Run integration tests
+        run: cargo test --test '*'
+
+      - name: Run doc tests
+        run: cargo test --doc
+
+  # Build release binary
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcapstone-dev
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "build"
+          cache-all-crates: true
+          prefix-key: "v2"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: snippex-linux-x86_64
+          path: target/release/snippex
+          if-no-files-found: error
+
+  # Quality assurance checks
   quality-assurance:
     name: Quality Assurance
     runs-on: ubuntu-latest
-    
+    needs: lint
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
+      - name: Checkout code
+        uses: actions/checkout@v6
 
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        components: rustfmt, clippy
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libcapstone-dev nasm
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcapstone-dev nasm
 
-    - name: Setup Rust cache
-      uses: Swatinem/rust-cache@v2
-      with:
-        shared-key: "qa"
-        cache-all-crates: true
-        prefix-key: "v2"
-        save-if: ${{ github.ref == 'refs/heads/main' }}
-        cache-bin: false
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "qa"
+          cache-all-crates: true
+          prefix-key: "v2"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-bin: false
 
-    - name: Install cargo-binstall
-      uses: cargo-bins/cargo-binstall@v1.16.6
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.16.6
 
-    - name: Make QA script executable
-      run: chmod +x scripts/qa.sh
+      - name: Make QA script executable
+        run: chmod +x scripts/qa.sh
 
-    - name: Run quality assurance checks
-      run: ./scripts/qa.sh
+      - name: Run quality assurance checks
+        run: ./scripts/qa.sh
 
-  test-coverage:
+  # Test coverage reporting
+  coverage:
     name: Test Coverage
     runs-on: ubuntu-latest
-
+    needs: test
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
+      - name: Checkout code
+        uses: actions/checkout@v6
 
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libcapstone-dev nasm
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcapstone-dev nasm
 
-    - name: Setup Rust cache
-      uses: Swatinem/rust-cache@v2
-      with:
-        shared-key: "coverage"
-        cache-all-crates: true
-        prefix-key: "v2"
-        save-if: ${{ github.ref == 'refs/heads/main' }}
-        cache-bin: false
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "coverage"
+          cache-all-crates: true
+          prefix-key: "v2"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-bin: false
 
-    - name: Install cargo-binstall
-      uses: cargo-bins/cargo-binstall@v1.16.6
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.16.6
 
-    - name: Install cargo-tarpaulin
-      run: cargo binstall --no-confirm cargo-tarpaulin
+      - name: Install cargo-tarpaulin
+        run: cargo binstall --no-confirm cargo-tarpaulin
 
-    - name: Generate coverage report
-      run: cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out xml
+      - name: Generate coverage report
+        run: cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out xml
 
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v5
-      with:
-        files: ./cobertura.xml
-        fail_ci_if_error: false
-        token: ${{ secrets.CODECOV_TOKEN }}
-        verbose: true
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./cobertura.xml
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
