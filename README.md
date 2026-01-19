@@ -1,5 +1,8 @@
 # Snippex
 
+[![CI](https://github.com/nicholasgriffintn/snippex/actions/workflows/ci.yml/badge.svg)](https://github.com/nicholasgriffintn/snippex/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/nicholasgriffintn/snippex/graph/badge.svg)](https://codecov.io/gh/nicholasgriffintn/snippex)
+
 A framework for extracting and analyzing assembly code blocks from ELF and PE binaries.
 
 ## Overview
