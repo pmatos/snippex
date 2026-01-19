@@ -8,6 +8,7 @@
 pub mod cleanup;
 pub mod diagnostics;
 pub mod executor;
+pub mod hash_verifier;
 pub mod orchestrator;
 pub mod package;
 pub mod pool;
@@ -23,6 +24,8 @@ pub use diagnostics::{
 };
 #[allow(unused_imports)]
 pub use executor::{ExecutionResult, SSHExecutor};
+#[allow(unused_imports)]
+pub use hash_verifier::{IncrementalTransfer, RemoteHashVerifier, VerificationResult};
 #[allow(unused_imports)]
 pub use orchestrator::RemoteOrchestrator;
 #[allow(unused_imports)]

@@ -103,7 +103,7 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
   - Store SHA256 hash of transferred binaries in local cache
   - Store hash + remote path mapping: `~/.cache/snippex/transfers.json`
 
-- [ ] **4.1.3.2** Implement remote hash verification
+- [x] **4.1.3.2** Implement remote hash verification
   - SSH command: `sha256sum /path/to/binary`
   - Compare with local hash to determine if transfer needed
 
