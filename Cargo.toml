@@ -21,7 +21,7 @@ env_logger = "0.11"
 log = "0.4"
 anyhow = "1.0"
 thiserror = "2.0"
-capstone = "0.13"
+capstone = "0.14"
 uuid = { version = "1.19", features = ["v4"] }
 tempfile = "3.10"
 chrono = { version = "0.4", features = ["serde"] }
@@ -40,4 +40,4 @@ tokio = { version = "1.44", features = ["rt-multi-thread", "macros"] }
 
 [dev-dependencies]
 tempfile = "3.10"
-capstone = "0.13"
+capstone = "0.14"
