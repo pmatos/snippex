@@ -229,6 +229,52 @@ impl Database {
             [],
         )?;
 
+        // Batch validation statistics tables
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS batch_runs (
+                id INTEGER PRIMARY KEY,
+                started_at DATETIME NOT NULL,
+                completed_at DATETIME,
+                block_count INTEGER NOT NULL,
+                pass_count INTEGER NOT NULL DEFAULT 0,
+                fail_count INTEGER NOT NULL DEFAULT 0,
+                skip_count INTEGER NOT NULL DEFAULT 0,
+                duration_ms INTEGER,
+                emulator TEXT,
+                description TEXT
+            )",
+            [],
+        )?;
+
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS batch_run_details (
+                id INTEGER PRIMARY KEY,
+                batch_id INTEGER NOT NULL,
+                extraction_id INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                duration_ns INTEGER,
+                error_message TEXT,
+                FOREIGN KEY (batch_id) REFERENCES batch_runs(id),
+                FOREIGN KEY (extraction_id) REFERENCES extractions(id)
+            )",
+            [],
+        )?;
+
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_batch_runs_started ON batch_runs(started_at)",
+            [],
+        )?;
+
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_batch_run_details_batch ON batch_run_details(batch_id)",
+            [],
+        )?;
+
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_batch_run_details_extraction ON batch_run_details(extraction_id)",
+            [],
+        )?;
+
         // Migration: Add base_address column to existing binaries table if it doesn't exist
         // This uses ALTER TABLE which will fail silently if column already exists
         let _ = self.conn.execute(
@@ -1129,6 +1175,321 @@ impl Database {
         )?;
         Ok(count as usize)
     }
+
+    // ==================== Batch Statistics Methods ====================
+
+    /// Starts a new batch run and returns its ID.
+    #[allow(dead_code)]
+    pub fn start_batch_run(
+        &mut self,
+        block_count: usize,
+        emulator: Option<&str>,
+        description: Option<&str>,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO batch_runs (started_at, block_count, emulator, description)
+             VALUES (CURRENT_TIMESTAMP, ?1, ?2, ?3)",
+            params![block_count as i64, emulator, description],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Completes a batch run with final statistics.
+    #[allow(dead_code)]
+    pub fn complete_batch_run(
+        &mut self,
+        batch_id: i64,
+        pass_count: usize,
+        fail_count: usize,
+        skip_count: usize,
+        duration_ms: u64,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE batch_runs SET
+                completed_at = CURRENT_TIMESTAMP,
+                pass_count = ?2,
+                fail_count = ?3,
+                skip_count = ?4,
+                duration_ms = ?5
+             WHERE id = ?1",
+            params![
+                batch_id,
+                pass_count as i64,
+                fail_count as i64,
+                skip_count as i64,
+                duration_ms as i64
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Records a single block result in a batch run.
+    #[allow(dead_code)]
+    pub fn record_batch_block_result(
+        &mut self,
+        batch_id: i64,
+        extraction_id: i64,
+        status: &str,
+        duration_ns: Option<u64>,
+        error_message: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO batch_run_details (batch_id, extraction_id, status, duration_ns, error_message)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                batch_id,
+                extraction_id,
+                status,
+                duration_ns.map(|d| d as i64),
+                error_message
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Gets summary statistics across all batch runs.
+    pub fn get_batch_summary_stats(&self) -> Result<BatchSummaryStats> {
+        let total_runs: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM batch_runs WHERE completed_at IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let total_blocks: i64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(block_count), 0) FROM batch_runs WHERE completed_at IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let total_pass: i64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(pass_count), 0) FROM batch_runs WHERE completed_at IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let total_fail: i64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(fail_count), 0) FROM batch_runs WHERE completed_at IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let total_skip: i64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(skip_count), 0) FROM batch_runs WHERE completed_at IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let avg_duration_ms: f64 = self.conn.query_row(
+            "SELECT COALESCE(AVG(duration_ms), 0) FROM batch_runs WHERE completed_at IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let pass_rate = if total_blocks > 0 {
+            (total_pass as f64 / total_blocks as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        Ok(BatchSummaryStats {
+            total_runs: total_runs as usize,
+            total_blocks: total_blocks as usize,
+            total_pass: total_pass as usize,
+            total_fail: total_fail as usize,
+            total_skip: total_skip as usize,
+            pass_rate,
+            avg_duration_ms,
+        })
+    }
+
+    /// Gets recent batch runs (most recent first).
+    pub fn get_recent_batch_runs(&self, limit: usize) -> Result<Vec<BatchRunInfo>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, started_at, completed_at, block_count, pass_count, fail_count,
+                    skip_count, duration_ms, emulator, description
+             FROM batch_runs
+             ORDER BY started_at DESC
+             LIMIT ?1",
+        )?;
+
+        let runs = stmt
+            .query_map(params![limit as i64], |row| {
+                Ok(BatchRunInfo {
+                    id: row.get(0)?,
+                    started_at: row.get(1)?,
+                    completed_at: row.get(2)?,
+                    block_count: row.get::<_, i64>(3)? as usize,
+                    pass_count: row.get::<_, i64>(4)? as usize,
+                    fail_count: row.get::<_, i64>(5)? as usize,
+                    skip_count: row.get::<_, i64>(6)? as usize,
+                    duration_ms: row.get::<_, Option<i64>>(7)?.map(|d| d as u64),
+                    emulator: row.get(8)?,
+                    description: row.get(9)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(runs)
+    }
+
+    /// Gets pass rate trends over time (by day).
+    pub fn get_pass_rate_trends(&self, days: usize) -> Result<Vec<DailyStats>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DATE(started_at) as day,
+                    SUM(block_count) as blocks,
+                    SUM(pass_count) as passes,
+                    SUM(fail_count) as fails
+             FROM batch_runs
+             WHERE completed_at IS NOT NULL
+               AND started_at >= DATE('now', ?1)
+             GROUP BY DATE(started_at)
+             ORDER BY day ASC",
+        )?;
+
+        let offset = format!("-{} days", days);
+        let trends = stmt
+            .query_map(params![offset], |row| {
+                let day: String = row.get(0)?;
+                let blocks: i64 = row.get(1)?;
+                let passes: i64 = row.get(2)?;
+                let fails: i64 = row.get(3)?;
+                let pass_rate = if blocks > 0 {
+                    (passes as f64 / blocks as f64) * 100.0
+                } else {
+                    0.0
+                };
+                Ok(DailyStats {
+                    date: day,
+                    total_blocks: blocks as usize,
+                    pass_count: passes as usize,
+                    fail_count: fails as usize,
+                    pass_rate,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(trends)
+    }
+
+    /// Gets blocks that consistently fail across multiple batch runs.
+    pub fn get_consistently_failing_blocks(&self, min_failures: usize) -> Result<Vec<FailingBlockInfo>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT d.extraction_id, COUNT(*) as fail_count,
+                    e.start_address, e.end_address, b.path
+             FROM batch_run_details d
+             JOIN extractions e ON d.extraction_id = e.id
+             JOIN binaries b ON e.binary_id = b.id
+             WHERE d.status = 'fail'
+             GROUP BY d.extraction_id
+             HAVING COUNT(*) >= ?1
+             ORDER BY fail_count DESC",
+        )?;
+
+        let blocks = stmt
+            .query_map(params![min_failures as i64], |row| {
+                Ok(FailingBlockInfo {
+                    extraction_id: row.get(0)?,
+                    failure_count: row.get::<_, i64>(1)? as usize,
+                    start_address: row.get::<_, i64>(2)? as u64,
+                    end_address: row.get::<_, i64>(3)? as u64,
+                    binary_path: row.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(blocks)
+    }
+
+    /// Gets blocks that intermittently fail (pass sometimes, fail sometimes).
+    pub fn get_flaky_blocks(&self, min_runs: usize) -> Result<Vec<FlakyBlockInfo>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT d.extraction_id,
+                    SUM(CASE WHEN d.status = 'pass' THEN 1 ELSE 0 END) as pass_count,
+                    SUM(CASE WHEN d.status = 'fail' THEN 1 ELSE 0 END) as fail_count,
+                    COUNT(*) as total_runs,
+                    e.start_address, e.end_address, b.path
+             FROM batch_run_details d
+             JOIN extractions e ON d.extraction_id = e.id
+             JOIN binaries b ON e.binary_id = b.id
+             GROUP BY d.extraction_id
+             HAVING COUNT(*) >= ?1
+                AND SUM(CASE WHEN d.status = 'pass' THEN 1 ELSE 0 END) > 0
+                AND SUM(CASE WHEN d.status = 'fail' THEN 1 ELSE 0 END) > 0
+             ORDER BY fail_count DESC",
+        )?;
+
+        let blocks = stmt
+            .query_map(params![min_runs as i64], |row| {
+                let pass_count: i64 = row.get(1)?;
+                let fail_count: i64 = row.get(2)?;
+                let total_runs: i64 = row.get(3)?;
+                let flakiness = if total_runs > 0 {
+                    (fail_count as f64 / total_runs as f64) * 100.0
+                } else {
+                    0.0
+                };
+                Ok(FlakyBlockInfo {
+                    extraction_id: row.get(0)?,
+                    pass_count: pass_count as usize,
+                    fail_count: fail_count as usize,
+                    total_runs: total_runs as usize,
+                    flakiness_percent: flakiness,
+                    start_address: row.get::<_, i64>(4)? as u64,
+                    end_address: row.get::<_, i64>(5)? as u64,
+                    binary_path: row.get(6)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(blocks)
+    }
+
+    /// Gets failure mode distribution (counts by error type).
+    pub fn get_failure_modes(&self) -> Result<Vec<FailureModeInfo>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT
+                CASE
+                    WHEN error_message LIKE '%register%' THEN 'Register mismatch'
+                    WHEN error_message LIKE '%memory%' THEN 'Memory mismatch'
+                    WHEN error_message LIKE '%flag%' THEN 'Flag mismatch'
+                    WHEN error_message LIKE '%exit%' OR error_message LIKE '%code%' THEN 'Exit code mismatch'
+                    WHEN error_message LIKE '%timeout%' THEN 'Timeout'
+                    WHEN error_message LIKE '%crash%' OR error_message LIKE '%segfault%' THEN 'Crash'
+                    WHEN error_message IS NULL THEN 'Unknown'
+                    ELSE 'Other'
+                END as failure_mode,
+                COUNT(*) as count
+             FROM batch_run_details
+             WHERE status = 'fail'
+             GROUP BY failure_mode
+             ORDER BY count DESC",
+        )?;
+
+        let modes = stmt
+            .query_map([], |row| {
+                Ok(FailureModeInfo {
+                    mode: row.get(0)?,
+                    count: row.get::<_, i64>(1)? as usize,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(modes)
+    }
+
+    /// Clears all batch statistics.
+    pub fn clear_batch_stats(&mut self) -> Result<usize> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM batch_runs",
+            [],
+            |row| row.get(0),
+        )?;
+
+        self.conn.execute("DELETE FROM batch_run_details", [])?;
+        self.conn.execute("DELETE FROM batch_runs", [])?;
+
+        Ok(count as usize)
+    }
 }
 
 /// Cached validation result.
@@ -1161,4 +1522,75 @@ pub struct CacheAgeDistribution {
     pub from_1_to_7_days: usize,
     pub from_7_to_30_days: usize,
     pub over_30_days: usize,
+}
+
+// ==================== Batch Statistics Structs ====================
+
+/// Summary statistics across all batch runs.
+#[derive(Debug, Clone)]
+pub struct BatchSummaryStats {
+    pub total_runs: usize,
+    pub total_blocks: usize,
+    pub total_pass: usize,
+    pub total_fail: usize,
+    pub total_skip: usize,
+    pub pass_rate: f64,
+    pub avg_duration_ms: f64,
+}
+
+/// Information about a single batch run.
+#[derive(Debug, Clone)]
+pub struct BatchRunInfo {
+    pub id: i64,
+    pub started_at: String,
+    pub completed_at: Option<String>,
+    pub block_count: usize,
+    pub pass_count: usize,
+    pub fail_count: usize,
+    pub skip_count: usize,
+    pub duration_ms: Option<u64>,
+    pub emulator: Option<String>,
+    #[allow(dead_code)]
+    pub description: Option<String>,
+}
+
+/// Daily statistics for trend analysis.
+#[derive(Debug, Clone)]
+pub struct DailyStats {
+    pub date: String,
+    pub total_blocks: usize,
+    pub pass_count: usize,
+    pub fail_count: usize,
+    pub pass_rate: f64,
+}
+
+/// Information about a consistently failing block.
+#[derive(Debug, Clone)]
+pub struct FailingBlockInfo {
+    pub extraction_id: i64,
+    pub failure_count: usize,
+    pub start_address: u64,
+    pub end_address: u64,
+    pub binary_path: String,
+}
+
+/// Information about a flaky (intermittently failing) block.
+#[derive(Debug, Clone)]
+pub struct FlakyBlockInfo {
+    pub extraction_id: i64,
+    pub pass_count: usize,
+    pub fail_count: usize,
+    pub total_runs: usize,
+    pub flakiness_percent: f64,
+    pub start_address: u64,
+    pub end_address: u64,
+    #[allow(dead_code)]
+    pub binary_path: String,
+}
+
+/// Failure mode information.
+#[derive(Debug, Clone)]
+pub struct FailureModeInfo {
+    pub mode: String,
+    pub count: usize,
 }

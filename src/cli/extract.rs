@@ -1,11 +1,24 @@
 use anyhow::Result;
-use clap::Args;
+use clap::{Args, ValueEnum};
 use log::debug;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+use crate::analyzer::complexity::{ComplexityAnalyzer, ComplexityScore};
 use crate::db::Database;
 use crate::extractor::{ExtractionFilter, Extractor, InstructionCategory};
+
+/// Selection strategy for smart block extraction.
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+pub enum SelectionStrategy {
+    /// Original random selection (default)
+    #[default]
+    Random,
+    /// Maximize instruction variety across selected blocks
+    Diverse,
+    /// Maximize complexity score (likely to expose FEX-Emu bugs)
+    Complex,
+}
 
 #[derive(Args)]
 pub struct ExtractCommand {
@@ -65,6 +78,33 @@ pub struct ExtractCommand {
         help = "Number of samples for dry-run preview"
     )]
     dry_run_samples: usize,
+
+    #[arg(
+        long,
+        help = "Enable smart block selection based on instruction complexity"
+    )]
+    smart_select: bool,
+
+    #[arg(
+        long,
+        value_enum,
+        default_value = "random",
+        help = "Selection strategy: random (default), diverse (maximize variety), complex (maximize complexity)"
+    )]
+    select_strategy: SelectionStrategy,
+
+    #[arg(
+        long,
+        default_value = "1",
+        help = "Number of blocks to extract (used with --smart-select)"
+    )]
+    count: usize,
+
+    #[arg(
+        long,
+        help = "Show detailed selection report explaining why blocks were chosen"
+    )]
+    selection_report: bool,
 }
 
 impl ExtractCommand {
@@ -74,6 +114,10 @@ impl ExtractCommand {
             return Err(anyhow::anyhow!(
                 "Cannot use both --has-memory-access and --no-memory-access"
             ));
+        }
+
+        if self.count == 0 {
+            return Err(anyhow::anyhow!("--count must be at least 1"));
         }
 
         if !self.quiet {
@@ -106,6 +150,11 @@ impl ExtractCommand {
         // Handle dry-run mode
         if self.dry_run {
             return self.execute_dry_run(&extractor, &filter);
+        }
+
+        // Handle smart selection mode
+        if self.smart_select || self.count > 1 {
+            return self.execute_smart_select(&extractor, &binary_info, &filter);
         }
 
         let mut db = Database::new(&self.database)?;
@@ -320,4 +369,255 @@ impl ExtractCommand {
                 .map_err(|e| anyhow::anyhow!("Invalid decimal address '{}': {}", addr_str, e))
         }
     }
+
+    fn execute_smart_select(
+        &self,
+        extractor: &Extractor,
+        binary_info: &crate::db::BinaryInfo,
+        filter: &ExtractionFilter,
+    ) -> Result<()> {
+        let mut db = Database::new(&self.database)?;
+        db.init()?;
+
+        if !self.quiet {
+            println!("Database initialized: {}", self.database.display());
+            println!(
+                "Smart selection mode: extracting {} block(s) with {:?} strategy",
+                self.count, self.select_strategy
+            );
+            if !filter.is_empty() {
+                self.print_filter_summary(filter);
+            }
+        }
+
+        let complexity_analyzer = ComplexityAnalyzer::new();
+        let cs = extractor.create_capstone()?;
+
+        // Generate candidate blocks
+        let candidate_count = self.count * 10; // Sample 10x the requested count
+        let mut candidates: Vec<CandidateBlock> = Vec::new();
+
+        if !self.quiet {
+            println!("Sampling {} candidate blocks...", candidate_count);
+        }
+
+        for _ in 0..candidate_count {
+            let result = if !filter.is_empty() {
+                extractor.extract_filtered_block(filter)
+            } else {
+                extractor.extract_random_aligned_block()
+            };
+
+            if let Ok((start_addr, end_addr, assembly_block)) = result {
+                // Disassemble and score
+                if let Ok(insns) = cs.disasm_all(&assembly_block, start_addr) {
+                    // Instructions derefs to &[Insn], so use &*insns
+                    let score = complexity_analyzer.score_block(&insns);
+                    let variety = complexity_analyzer.get_instruction_variety(&insns);
+                    let has_problematic =
+                        complexity_analyzer.has_problematic_instructions(&insns);
+
+                    candidates.push(CandidateBlock {
+                        start_addr,
+                        end_addr,
+                        assembly_block,
+                        complexity_score: score,
+                        instruction_variety: variety,
+                        has_problematic_instructions: has_problematic,
+                        instruction_count: insns.len(),
+                    });
+                }
+            }
+        }
+
+        if candidates.is_empty() {
+            return Err(anyhow::anyhow!(
+                "Could not extract any valid blocks from this binary"
+            ));
+        }
+
+        // Select blocks based on strategy
+        let selected = self.select_blocks(&mut candidates);
+
+        if !self.quiet {
+            println!(
+                "\nSelected {} block(s) from {} candidates:",
+                selected.len(),
+                candidates.len() + selected.len()
+            );
+        }
+
+        // Store selected blocks and print report
+        let mut total_instructions = HashSet::new();
+        for (i, block) in selected.iter().enumerate() {
+            db.store_extraction(
+                binary_info,
+                block.start_addr,
+                block.end_addr,
+                &block.assembly_block,
+            )?;
+
+            total_instructions.extend(block.instruction_variety.iter().cloned());
+
+            if !self.quiet {
+                println!(
+                    "\n  Block {}: 0x{:08x} - 0x{:08x} ({} bytes, {} instructions)",
+                    i + 1,
+                    block.start_addr,
+                    block.end_addr,
+                    block.assembly_block.len(),
+                    block.instruction_count
+                );
+
+                if self.selection_report || self.verbose {
+                    self.print_block_report(block);
+                }
+            }
+        }
+
+        if !self.quiet {
+            println!("\n✓ {} block(s) stored in database successfully", selected.len());
+
+            if self.selection_report {
+                self.print_selection_summary(&selected, &total_instructions);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn select_blocks(&self, candidates: &mut Vec<CandidateBlock>) -> Vec<CandidateBlock> {
+        match self.select_strategy {
+            SelectionStrategy::Random => {
+                // Just take first N (already randomly extracted)
+                candidates.truncate(self.count);
+                std::mem::take(candidates)
+            }
+            SelectionStrategy::Complex => {
+                // Sort by complexity score (descending) and take top N
+                candidates.sort_by(|a, b| {
+                    b.complexity_score
+                        .total
+                        .partial_cmp(&a.complexity_score.total)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                candidates.truncate(self.count);
+                std::mem::take(candidates)
+            }
+            SelectionStrategy::Diverse => {
+                // Greedy selection to maximize instruction variety
+                let mut selected = Vec::new();
+                let mut covered_instructions: HashSet<String> = HashSet::new();
+
+                while selected.len() < self.count && !candidates.is_empty() {
+                    // Find candidate that adds most new instructions
+                    let best_idx = candidates
+                        .iter()
+                        .enumerate()
+                        .max_by_key(|(_, c)| {
+                            c.instruction_variety
+                                .difference(&covered_instructions)
+                                .count()
+                        })
+                        .map(|(i, _)| i);
+
+                    if let Some(idx) = best_idx {
+                        let block = candidates.remove(idx);
+                        covered_instructions.extend(block.instruction_variety.iter().cloned());
+                        selected.push(block);
+                    } else {
+                        break;
+                    }
+                }
+
+                selected
+            }
+        }
+    }
+
+    fn print_block_report(&self, block: &CandidateBlock) {
+        println!("    Complexity Score: {:.2}", block.complexity_score.total);
+        println!(
+            "      - Rarity:     {:.2}",
+            block.complexity_score.rarity
+        );
+        println!(
+            "      - Addressing: {:.2}",
+            block.complexity_score.addressing
+        );
+        println!(
+            "      - Operands:   {:.2}",
+            block.complexity_score.operands
+        );
+        println!(
+            "    Instruction Variety: {} unique mnemonics",
+            block.instruction_variety.len()
+        );
+        if block.has_problematic_instructions {
+            println!("    ⚠ Contains problematic instructions (likely to expose FEX-Emu bugs)");
+        }
+
+        // Show top instructions
+        let mut instr_list: Vec<_> = block.instruction_variety.iter().collect();
+        instr_list.sort();
+        let display_list: Vec<_> = instr_list.iter().take(10).map(|s| s.as_str()).collect();
+        if !display_list.is_empty() {
+            println!("    Instructions: {}", display_list.join(", "));
+            if block.instruction_variety.len() > 10 {
+                println!(
+                    "                  ... and {} more",
+                    block.instruction_variety.len() - 10
+                );
+            }
+        }
+    }
+
+    fn print_selection_summary(
+        &self,
+        selected: &[CandidateBlock],
+        total_instructions: &HashSet<String>,
+    ) {
+        println!("\n=== Selection Summary ===");
+        println!("Strategy: {:?}", self.select_strategy);
+        println!("Blocks selected: {}", selected.len());
+        println!(
+            "Total unique instructions covered: {}",
+            total_instructions.len()
+        );
+
+        // Count blocks with problematic instructions
+        let problematic_count = selected
+            .iter()
+            .filter(|b| b.has_problematic_instructions)
+            .count();
+        println!(
+            "Blocks with problematic instructions: {}",
+            problematic_count
+        );
+
+        // Average complexity
+        let avg_complexity: f64 =
+            selected.iter().map(|b| b.complexity_score.total).sum::<f64>() / selected.len() as f64;
+        println!("Average complexity score: {:.2}", avg_complexity);
+
+        // Show instruction coverage
+        let mut instr_list: Vec<_> = total_instructions.iter().collect();
+        instr_list.sort();
+        println!("\nInstruction categories covered:");
+        for chunk in instr_list.chunks(8) {
+            let line: Vec<_> = chunk.iter().map(|s| s.as_str()).collect();
+            println!("  {}", line.join(", "));
+        }
+    }
+}
+
+/// A candidate block for smart selection.
+struct CandidateBlock {
+    start_addr: u64,
+    end_addr: u64,
+    assembly_block: Vec<u8>,
+    complexity_score: ComplexityScore,
+    instruction_variety: HashSet<String>,
+    has_problematic_instructions: bool,
+    instruction_count: usize,
 }

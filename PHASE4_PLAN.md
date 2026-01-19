@@ -18,35 +18,35 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
 
 **Implementation Tasks**:
 
-- [ ] **4.1.1.1** Add `rayon` dependency for work-stealing thread pool
+- [x] **4.1.1.1** Add `rayon` dependency for work-stealing thread pool
   - File: `Cargo.toml`
   - Add: `rayon = "1.8"`
 
-- [ ] **4.1.1.2** Create `ParallelValidator` struct
+- [x] **4.1.1.2** Create `ParallelValidator` struct
   - File: `src/cli/validate_batch.rs` (or new `src/parallel/mod.rs`)
   - Fields: thread count, progress tracker, result aggregator
   - Use `rayon::ThreadPoolBuilder` for configurable parallelism
 
-- [ ] **4.1.1.3** Implement thread-safe progress reporting
+- [x] **4.1.1.3** Implement thread-safe progress reporting
   - Use `std::sync::atomic::AtomicUsize` for counters
   - Use `indicatif` crate for progress bar (already in ecosystem)
   - Aggregate results safely with `Mutex<Vec<BlockValidationResult>>`
 
-- [ ] **4.1.1.4** Add `--parallel` and `--threads` CLI options
+- [x] **4.1.1.4** Add `--parallel` and `--threads` CLI options
   - `--parallel`: Enable parallel execution (default: off)
   - `--threads N`: Number of worker threads (default: CPU count)
 
-- [ ] **4.1.1.5** Handle shared resources correctly
+- [x] **4.1.1.5** Handle shared resources correctly
   - Database connections: Use connection pool or one per thread
   - SSH connections: See 4.1.2 for connection pooling
   - Temporary files: Use unique prefixes per thread
 
-- [ ] **4.1.1.6** Write tests for parallel execution
+- [x] **4.1.1.6** Write tests for parallel execution
   - Test: No race conditions in result aggregation
   - Test: Progress reporting accuracy
   - Test: Error handling in parallel context
 
-**Estimated Effort**: 4-6 hours
+**Estimated Effort**: 4-6 hours (COMPLETED)
 
 ---
 
@@ -58,36 +58,36 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
 
 **Implementation Tasks**:
 
-- [ ] **4.1.2.1** Create `SSHConnectionPool` struct
+- [x] **4.1.2.1** Create `SSHConnectionPool` struct
   - File: `src/remote/pool.rs` (new file)
   - Maintain pool of active `Session` objects keyed by host
   - Use `std::sync::Mutex<HashMap<String, PooledConnection>>`
 
-- [ ] **4.1.2.2** Implement connection lifecycle management
+- [x] **4.1.2.2** Implement connection lifecycle management
   - `acquire(remote_config) -> Session`: Get or create connection
   - `release(session)`: Return connection to pool
   - `close_idle(timeout)`: Clean up stale connections
   - Implement keep-alive pings to detect dead connections
 
-- [ ] **4.1.2.3** Add connection health checks
+- [x] **4.1.2.3** Add connection health checks
   - Verify session is still authenticated before reuse
   - Test connection with lightweight command (`echo ping`)
   - Reconnect automatically if health check fails
 
-- [ ] **4.1.2.4** Integrate with `RemoteOrchestrator`
+- [x] **4.1.2.4** Integrate with `RemoteOrchestrator`
   - Modify `RemoteOrchestrator` to accept optional `ConnectionPool`
   - Fall back to fresh connections if pooling disabled
 
-- [ ] **4.1.2.5** Add `--connection-pool` CLI option
+- [x] **4.1.2.5** Add `--connection-pool` CLI option
   - Enable/disable connection pooling (default: enabled for batch)
   - Add `--pool-size N` option (default: 4)
 
-- [ ] **4.1.2.6** Write tests for connection pooling
+- [x] **4.1.2.6** Write tests for connection pooling
   - Test: Connection reuse reduces overhead
   - Test: Dead connection detection and recovery
   - Test: Pool cleanup on shutdown
 
-**Estimated Effort**: 6-8 hours
+**Estimated Effort**: 6-8 hours (COMPLETED)
 
 ---
 
@@ -137,28 +137,28 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
 
 **Implementation Tasks**:
 
-- [ ] **4.1.4.1** Review and optimize existing cache schema
+- [x] **4.1.4.1** Review and optimize existing cache schema
   - File: `src/db/mod.rs`
   - Ensure indexes on (block_id, emulator, timestamp)
   - Add composite index for fast lookups
 
-- [ ] **4.1.4.2** Implement cache key generation
+- [x] **4.1.4.2** Implement cache key generation
   - Key components: block_hash, emulator_version, initial_state_hash
   - Use fast hashing (xxhash) for cache key
 
-- [ ] **4.1.4.3** Add cache statistics command
+- [x] **4.1.4.3** Add cache statistics command
   - `snippex cache stats`: Show hit rate, size, age distribution
   - `snippex cache prune`: Remove entries older than TTL
 
-- [ ] **4.1.4.4** Implement LRU eviction
+- [x] **4.1.4.4** Implement LRU eviction
   - When cache exceeds size limit, remove least recently used
   - Add `--cache-max-size` configuration option
 
-- [ ] **4.1.4.5** Add cache warming for batch operations
+- [x] **4.1.4.5** Add cache warming for batch operations
   - Pre-fetch cache entries for block range
   - Report cache hit ratio at end of batch
 
-**Estimated Effort**: 3-4 hours
+**Estimated Effort**: 3-4 hours (COMPLETED)
 
 ---
 
@@ -172,22 +172,22 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
 
 **Implementation Tasks**:
 
-- [ ] **4.2.1.1** Create `RegisterDiffFormatter` struct
+- [x] **4.2.1.1** Create `RegisterDiffFormatter` struct
   - File: `src/cli/compare.rs` or new `src/formatting/diff.rs`
   - Format register values with alignment
   - Highlight differing bits/bytes
 
-- [ ] **4.2.1.2** Implement bit-level difference highlighting
+- [x] **4.2.1.2** Implement bit-level difference highlighting
   - Show: `RAX: 0x0000_0000_0000_00FF vs 0x0000_0000_0000_0100`
   - Highlight: `                  ^^         ^^^` (differing positions)
   - Use ANSI colors: red for mismatches, green for matches
 
-- [ ] **4.2.1.3** Add register grouping
+- [x] **4.2.1.3** Add register grouping
   - Group by category: General Purpose, Flags, Segment, Vector
   - Show only changed registers by default
   - Add `--show-all-registers` flag
 
-- [ ] **4.2.1.4** Implement side-by-side table output
+- [x] **4.2.1.4** Implement side-by-side table output
   ```
   Register    Native              FEX-Emu             Status
   ───────────────────────────────────────────────────────────
@@ -196,11 +196,11 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
   RFLAGS      0x0000000000000246  0x0000000000000244  ✗ (ZF differs)
   ```
 
-- [ ] **4.2.1.5** Add JSON diff output
+- [x] **4.2.1.5** Add JSON diff output
   - Structured diff for machine processing
   - Include before/after values, bit positions
 
-**Estimated Effort**: 4-5 hours
+**Estimated Effort**: 4-5 hours (COMPLETED)
 
 ---
 
@@ -210,12 +210,12 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
 
 **Implementation Tasks**:
 
-- [ ] **4.2.2.1** Create `HexDiffFormatter` struct
+- [x] **4.2.2.1** Create `HexDiffFormatter` struct
   - File: `src/formatting/hexdiff.rs` (new)
   - Support configurable bytes per line (default: 16)
   - Show address, hex bytes, ASCII representation
 
-- [ ] **4.2.2.2** Implement side-by-side hex diff
+- [x] **4.2.2.2** Implement side-by-side hex diff
   ```
   Address          Native                           FEX-Emu
   ─────────────────────────────────────────────────────────────────
@@ -224,20 +224,20 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
                                    ^^                          ^^
   ```
 
-- [ ] **4.2.2.3** Add difference highlighting
+- [x] **4.2.2.3** Add difference highlighting
   - Inline highlighting for changed bytes
   - Summary: "2 bytes differ at offsets 0x0E, 0x0F"
 
-- [ ] **4.2.2.4** Support various output formats
+- [x] **4.2.2.4** Support various output formats
   - `--hex-format unified`: Unified diff format
   - `--hex-format split`: Side-by-side format
   - `--hex-format json`: Machine-readable diff
 
-- [ ] **4.2.2.5** Add memory region filtering
+- [x] **4.2.2.5** Add memory region filtering
   - `--memory-region 0x10000000-0x10001000`: Only show specific range
   - `--memory-diff-only`: Only show regions with differences
 
-**Estimated Effort**: 4-5 hours
+**Estimated Effort**: 4-5 hours (COMPLETED)
 
 ---
 
@@ -247,12 +247,12 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
 
 **Implementation Tasks**:
 
-- [ ] **4.2.3.1** Define x86 flag bit positions
+- [x] **4.2.3.1** Define x86 flag bit positions
   - File: `src/simulator/state.rs` or new `src/arch/flags.rs`
   - CF (bit 0), PF (bit 2), AF (bit 4), ZF (bit 6), SF (bit 7), etc.
   - Create `Flags` struct with individual fields
 
-- [ ] **4.2.3.2** Implement flag extraction and naming
+- [x] **4.2.3.2** Implement flag extraction and naming
   ```rust
   pub struct FlagState {
       pub cf: bool,  // Carry
@@ -267,7 +267,7 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
   }
   ```
 
-- [ ] **4.2.3.3** Create flag comparison display
+- [x] **4.2.3.3** Create flag comparison display
   ```
   Flags Comparison:
     CF (Carry):     0 vs 0  ✓
@@ -276,15 +276,15 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
     OF (Overflow):  0 vs 0  ✓
   ```
 
-- [ ] **4.2.3.4** Add `--flag-detail` CLI option
+- [x] **4.2.3.4** Add `--flag-detail` CLI option
   - Show flag breakdown in compare/validate output
   - Default: summary only, detailed on request
 
-- [ ] **4.2.3.5** Document flag semantics
+- [x] **4.2.3.5** Document flag semantics
   - What each flag means
   - Common causes of flag differences (overflow, sign changes)
 
-**Estimated Effort**: 2-3 hours
+**Estimated Effort**: 2-3 hours (COMPLETED)
 
 ---
 
@@ -294,31 +294,31 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
 
 **Implementation Tasks**:
 
-- [ ] **4.2.4.1** Design statistics schema
+- [x] **4.2.4.1** Design statistics schema
   - File: `src/db/mod.rs`
   - Table: `batch_runs` (id, timestamp, block_count, pass_count, fail_count, duration)
   - Table: `batch_run_details` (batch_id, block_id, status, duration)
 
-- [ ] **4.2.4.2** Implement statistics collection
+- [x] **4.2.4.2** Implement statistics collection
   - Record each batch run with summary statistics
   - Store per-block results for drill-down analysis
 
-- [ ] **4.2.4.3** Create `snippex stats` command
+- [x] **4.2.4.3** Create `snippex stats` command
   - `snippex stats summary`: Overall pass/fail rates
   - `snippex stats trends`: Show rates over time
   - `snippex stats blocks --failing`: List consistently failing blocks
   - `snippex stats blocks --flaky`: List intermittently failing blocks
 
-- [ ] **4.2.4.4** Generate statistical report
+- [x] **4.2.4.4** Generate statistical report
   - Success rate by instruction type
   - Most common failure modes
   - Performance trends (execution time)
 
-- [ ] **4.2.4.5** Add visualization (ASCII charts)
+- [x] **4.2.4.5** Add visualization (ASCII charts)
   - Success rate over time (ASCII bar chart)
   - Failure distribution by category
 
-**Estimated Effort**: 5-6 hours
+**Estimated Effort**: 5-6 hours (COMPLETED)
 
 ---
 
@@ -369,33 +369,33 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
 
 **Implementation Tasks**:
 
-- [ ] **4.3.2.1** Create instruction complexity scorer
+- [x] **4.3.2.1** Create instruction complexity scorer
   - File: `src/analyzer/complexity.rs` (new)
   - Score based on: instruction rarity, addressing mode complexity, operand count
 
-- [ ] **4.3.2.2** Identify problematic instruction categories
+- [x] **4.3.2.2** Identify problematic instruction categories
   - Research FEX-Emu known issues/bugs
   - Categories: SSE/AVX edge cases, FPU operations, complex addressing
   - Create `PROBLEMATIC_INSTRUCTIONS.md` reference
 
-- [ ] **4.3.2.3** Implement `--smart-select` option
+- [x] **4.3.2.3** Implement `--smart-select` option
   - Prioritize blocks with:
     - Complex addressing modes ([base+index*scale+disp])
     - Rare instructions (less common in test suites)
     - Multiple memory operands
     - Mixed register sizes (e.g., 32-bit in 64-bit context)
 
-- [ ] **4.3.2.4** Add selection strategy options
+- [x] **4.3.2.4** Add selection strategy options
   - `--select-strategy diverse`: Maximize instruction variety
   - `--select-strategy complex`: Maximize complexity score
   - `--select-strategy random`: Original random selection (default)
 
-- [ ] **4.3.2.5** Create selection report
+- [x] **4.3.2.5** Create selection report
   - Show why each block was selected
   - List instruction categories covered
   - Show complexity distribution
 
-**Estimated Effort**: 6-8 hours
+**Estimated Effort**: 6-8 hours (COMPLETED)
 
 ---
 
@@ -407,29 +407,29 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
 
 **Implementation Tasks**:
 
-- [ ] **4.4.1.1** Create `CsvExporter` struct
+- [x] **4.4.1.1** Create `CsvExporter` struct
   - File: `src/export/csv.rs` (new)
   - Define CSV schema for validation results
 
-- [ ] **4.4.1.2** Implement CSV export for batch results
+- [x] **4.4.1.2** Implement CSV export for batch results
   - Columns: block_id, binary, start_addr, end_addr, native_result, fex_result, status, duration
   - Include register diffs if --detailed
   - Support custom column selection
 
-- [ ] **4.4.1.3** Add `--export-csv <path>` option to validate-batch
+- [x] **4.4.1.3** Add `--export-csv <path>` option to validate-batch
   - Write results to specified file
   - Support stdout with `--export-csv -`
 
-- [ ] **4.4.1.4** Add `snippex export` command
+- [x] **4.4.1.4** Add `snippex export` command
   - `snippex export csv --blocks 1-100`: Export block metadata
   - `snippex export csv --validations`: Export all validation results
   - `snippex export csv --simulations`: Export simulation history
 
-- [ ] **4.4.1.5** Support incremental export
+- [x] **4.4.1.5** Support incremental export
   - Append to existing CSV
   - Add timestamp column for incremental runs
 
-**Estimated Effort**: 3-4 hours
+**Estimated Effort**: 3-4 hours (COMPLETED)
 
 ---
 
@@ -439,32 +439,32 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
 
 **Implementation Tasks**:
 
-- [ ] **4.4.2.1** Create HTML report template
+- [x] **4.4.2.1** Create HTML report template
   - File: `src/export/html.rs` (new) + templates
   - Use embedded template (askama or tera crate)
   - Include CSS for styling (embedded, no external deps)
 
-- [ ] **4.4.2.2** Design report sections
+- [x] **4.4.2.2** Design report sections
   - Executive summary: pass/fail counts, overall verdict
   - Block details table with expandable rows
   - Diff viewer for failed blocks
   - Charts: success rate, timing distribution
 
-- [ ] **4.4.2.3** Implement SVG chart generation
+- [x] **4.4.2.3** Implement SVG chart generation
   - Success/failure pie chart
   - Execution time histogram
   - Use simple SVG generation (no heavy charting libs)
 
-- [ ] **4.4.2.4** Add `--export-html <path>` option
+- [x] **4.4.2.4** Add `--export-html <path>` option
   - Generate complete standalone HTML file
   - Embed all CSS/JS (no external dependencies)
 
-- [ ] **4.4.2.5** Support interactive features
+- [x] **4.4.2.5** Support interactive features
   - Expandable/collapsible sections
   - Filter table by status
   - Search functionality (JS)
 
-**Estimated Effort**: 6-8 hours
+**Estimated Effort**: 6-8 hours (COMPLETED)
 
 ---
 

@@ -27,6 +27,7 @@ use cli::list::ListCommand;
 use cli::remove::RemoveCommand;
 use cli::simulate::SimulateCommand;
 use cli::simulate_remote::SimulateRemoteCommand;
+use cli::stats::StatsCommand;
 use cli::validate::ValidateCommand;
 use cli::validate_batch::ValidateBatchCommand;
 
@@ -91,6 +92,7 @@ enum Commands {
     Compare(CompareCommand),
     Config(ConfigCommand),
     Cache(CacheCommand),
+    Stats(StatsCommand),
     /// Generate shell completion scripts
     Completions(CompletionsCommand),
 }
@@ -148,6 +150,7 @@ fn main() -> Result<()> {
         Commands::Compare(cmd) => cmd.execute(),
         Commands::Config(cmd) => cmd.execute(),
         Commands::Cache(cmd) => cmd.execute(),
+        Commands::Stats(cmd) => cmd.execute(),
         Commands::Completions(cmd) => cmd.execute(),
     }
 }

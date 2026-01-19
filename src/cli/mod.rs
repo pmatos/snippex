@@ -11,5 +11,6 @@ pub mod list;
 pub mod remove;
 pub mod simulate;
 pub mod simulate_remote;
+pub mod stats;
 pub mod validate;
 pub mod validate_batch;
