@@ -72,10 +72,63 @@ impl EmulatorConfig {
     }
 
     pub fn fex_emu() -> Self {
+        // Look for FEXInterpreter in common locations
+        let binary = Self::find_fex_binary().unwrap_or_else(|| "FEXInterpreter".to_string());
         Self::FexEmu {
-            binary: "FEXInterpreter".to_string(),
+            binary,
             args: vec![],
         }
+    }
+
+    /// Searches for FEXInterpreter in common installation locations
+    fn find_fex_binary() -> Option<String> {
+        use std::path::Path;
+
+        // Check common FEX installation paths
+        let common_paths = [
+            // Standard PATH lookup
+            "FEXInterpreter",
+            // User-local installations
+            "~/.local/bin/FEXInterpreter",
+            // Common FEX build locations
+            "~/dev/FEX/out/install/Release/bin/FEXInterpreter",
+            "~/FEX/build/bin/FEXInterpreter",
+            // System-wide installations
+            "/usr/local/bin/FEXInterpreter",
+            "/usr/bin/FEXInterpreter",
+            "/opt/FEX/bin/FEXInterpreter",
+        ];
+
+        for path in common_paths {
+            let expanded = if path.starts_with("~/") {
+                if let Ok(home) = std::env::var("HOME") {
+                    path.replacen("~", &home, 1)
+                } else {
+                    path.to_string()
+                }
+            } else {
+                path.to_string()
+            };
+
+            if Path::new(&expanded).exists() {
+                return Some(expanded);
+            }
+        }
+
+        // Also check if it's in PATH via which
+        if let Ok(output) = std::process::Command::new("which")
+            .arg("FEXInterpreter")
+            .output()
+        {
+            if output.status.success() {
+                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !path.is_empty() {
+                    return Some(path);
+                }
+            }
+        }
+
+        None
     }
 
     pub fn is_available(&self) -> bool {
@@ -86,11 +139,15 @@ impl EmulatorConfig {
                 .output()
                 .map(|output| output.status.success())
                 .unwrap_or(false),
-            EmulatorConfig::FexEmu { binary, .. } => std::process::Command::new(binary)
-                .arg("--version")
-                .output()
-                .map(|output| output.status.success())
-                .unwrap_or(false),
+            EmulatorConfig::FexEmu { binary, .. } => {
+                // FEXInterpreter doesn't support --version, so just check if binary exists
+                std::path::Path::new(binary).exists()
+                    || std::process::Command::new("which")
+                        .arg(binary)
+                        .output()
+                        .map(|output| output.status.success())
+                        .unwrap_or(false)
+            }
         }
     }
 }

@@ -159,10 +159,23 @@ impl From<&EmulatorData> for EmulatorConfig {
                 binary: binary.clone(),
                 args: args.clone(),
             },
-            EmulatorData::FexEmu { binary, args } => EmulatorConfig::FexEmu {
-                binary: binary.clone(),
-                args: args.clone(),
-            },
+            EmulatorData::FexEmu { binary: _, args } => {
+                // Re-resolve FEX binary on the current machine since the stored path
+                // may not be valid (e.g., package created on x86 where FEX doesn't exist)
+                let resolved = EmulatorConfig::fex_emu();
+                if let EmulatorConfig::FexEmu {
+                    binary: resolved_binary,
+                    ..
+                } = resolved
+                {
+                    EmulatorConfig::FexEmu {
+                        binary: resolved_binary,
+                        args: args.clone(),
+                    }
+                } else {
+                    resolved
+                }
+            }
         }
     }
 }
