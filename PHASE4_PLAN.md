@@ -120,7 +120,7 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
 - [x] **4.1.3.5** Add `--skip-cached-transfer` CLI option
   - Enable optimization (default: on for batch, off for single)
 
-- [ ] **4.1.3.6** Write tests for incremental transfer
+- [x] **4.1.3.6** Write tests for incremental transfer
   - Test: Same binary not re-transferred
   - Test: Modified binary triggers new transfer
   - Test: Cache invalidation works correctly

@@ -693,4 +693,120 @@ mod tests {
         // This command should not exist
         assert!(!DeltaTransfer::command_exists("nonexistent_command_12345"));
     }
+
+    #[test]
+    fn test_delta_transfer_result_is_delta() {
+        let delta_result = DeltaTransferResult {
+            remote_path: PathBuf::from("/tmp/test"),
+            bytes_transferred: 100,
+            original_size: 1000,
+            method: TransferMethod::Rsync,
+            is_delta: true,
+        };
+
+        assert!(delta_result.is_delta);
+        assert_eq!(delta_result.bytes_saved(), 900);
+
+        let full_result = DeltaTransferResult {
+            remote_path: PathBuf::from("/tmp/test"),
+            bytes_transferred: 800,
+            original_size: 1000,
+            method: TransferMethod::ScpZstd,
+            is_delta: false,
+        };
+
+        assert!(!full_result.is_delta);
+        assert_eq!(full_result.bytes_saved(), 200);
+    }
+
+    #[test]
+    fn test_transfer_method_priority() {
+        // Rsync should be preferred over compressed SCP
+        let caps_rsync = TransferCapabilities {
+            local_rsync: true,
+            remote_rsync: true,
+            local_zstd: true,
+            remote_zstd: true,
+            local_gzip: true,
+            remote_gzip: true,
+        };
+        assert_eq!(caps_rsync.best_method(), TransferMethod::Rsync);
+
+        // zstd should be preferred over gzip
+        let caps_zstd = TransferCapabilities {
+            local_rsync: false,
+            remote_rsync: false,
+            local_zstd: true,
+            remote_zstd: true,
+            local_gzip: true,
+            remote_gzip: true,
+        };
+        assert_eq!(caps_zstd.best_method(), TransferMethod::ScpZstd);
+
+        // gzip should be preferred over plain
+        let caps_gzip = TransferCapabilities {
+            local_rsync: false,
+            remote_rsync: false,
+            local_zstd: false,
+            remote_zstd: false,
+            local_gzip: true,
+            remote_gzip: true,
+        };
+        assert_eq!(caps_gzip.best_method(), TransferMethod::ScpGzip);
+    }
+
+    #[test]
+    fn test_capabilities_asymmetric() {
+        // One side missing a capability should disable that method
+        let caps = TransferCapabilities {
+            local_rsync: true,
+            remote_rsync: false, // Remote doesn't have rsync
+            local_zstd: true,
+            remote_zstd: true,
+            local_gzip: true,
+            remote_gzip: true,
+        };
+
+        assert!(!caps.can_rsync());
+        assert!(caps.can_zstd());
+        assert_eq!(caps.best_method(), TransferMethod::ScpZstd);
+    }
+
+    #[test]
+    fn test_transfer_result_savings_calculation() {
+        // Test various scenarios of transfer savings
+
+        // High compression scenario
+        let high_compression = DeltaTransferResult {
+            remote_path: PathBuf::from("/tmp/test"),
+            bytes_transferred: 100,
+            original_size: 1000,
+            method: TransferMethod::ScpZstd,
+            is_delta: false,
+        };
+        assert_eq!(high_compression.bytes_saved(), 900);
+        assert!((high_compression.compression_ratio() - 0.1).abs() < 0.001);
+
+        // No savings scenario
+        let no_savings = DeltaTransferResult {
+            remote_path: PathBuf::from("/tmp/test"),
+            bytes_transferred: 1000,
+            original_size: 1000,
+            method: TransferMethod::ScpPlain,
+            is_delta: false,
+        };
+        assert_eq!(no_savings.bytes_saved(), 0);
+        assert!((no_savings.compression_ratio() - 1.0).abs() < 0.001);
+
+        // Delta transfer with minimal data
+        let delta_minimal = DeltaTransferResult {
+            remote_path: PathBuf::from("/tmp/test"),
+            bytes_transferred: 10,
+            original_size: 10000,
+            method: TransferMethod::Rsync,
+            is_delta: true,
+        };
+        assert_eq!(delta_minimal.bytes_saved(), 9990);
+        assert!((delta_minimal.compression_ratio() - 0.001).abs() < 0.0001);
+    }
 }

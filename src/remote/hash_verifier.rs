@@ -347,4 +347,202 @@ mod tests {
         assert!(transfer.cache().is_empty());
         assert_eq!(transfer.remote_host_id(), "testuser@example.com:22");
     }
+
+    #[test]
+    fn test_same_binary_not_retransferred() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let binary_path = temp_dir.path().join("test.bin");
+        fs::write(&binary_path, b"binary content").unwrap();
+
+        let config = RemoteConfig::new("example.com".to_string(), "testuser".to_string());
+        let mut cache = TransferCache::new();
+
+        // Calculate hash and insert into cache
+        let hash = cache
+            .insert_from_path(
+                &binary_path,
+                "/tmp/remote/test.bin".to_string(),
+                "testuser@example.com:22".to_string(),
+            )
+            .unwrap();
+
+        // Create transfer handler with pre-populated cache
+        let transfer = IncrementalTransfer::with_cache(config, cache);
+
+        // Check if the same binary exists in cache
+        let entry = transfer.cache().get(&hash, "testuser@example.com:22");
+        assert!(entry.is_some());
+        assert_eq!(entry.unwrap().remote_path, "/tmp/remote/test.bin");
+    }
+
+    #[test]
+    fn test_modified_binary_triggers_new_transfer() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let binary_path = temp_dir.path().join("test.bin");
+
+        let _config = RemoteConfig::new("example.com".to_string(), "testuser".to_string());
+        let mut cache = TransferCache::new();
+
+        // First version of binary
+        fs::write(&binary_path, b"original content").unwrap();
+        let hash1 = cache
+            .insert_from_path(
+                &binary_path,
+                "/tmp/remote/test.bin".to_string(),
+                "testuser@example.com:22".to_string(),
+            )
+            .unwrap();
+
+        // Modify the binary
+        fs::write(&binary_path, b"modified content").unwrap();
+        let hash2 = TransferCache::compute_file_hash(&binary_path).unwrap();
+
+        // Hashes should differ
+        assert_ne!(hash1, hash2);
+
+        // Old hash should still be in cache
+        assert!(cache.get(&hash1, "testuser@example.com:22").is_some());
+
+        // New hash should not be in cache yet (needs transfer)
+        assert!(cache.get(&hash2, "testuser@example.com:22").is_none());
+    }
+
+    #[test]
+    fn test_cache_entry_expiry_check() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        // Test that TransferCacheEntry::is_expired works correctly
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let recent_entry = TransferCacheEntry {
+            hash: "recent".to_string(),
+            remote_path: "/tmp/recent".to_string(),
+            remote_host: "user@host:22".to_string(),
+            transferred_at: now,
+            size: 1024,
+        };
+        // Recent entry should not be expired with 7-day TTL
+        assert!(!recent_entry.is_expired(7 * 24 * 60 * 60));
+
+        let old_entry = TransferCacheEntry {
+            hash: "old".to_string(),
+            remote_path: "/tmp/old".to_string(),
+            remote_host: "user@host:22".to_string(),
+            transferred_at: 0, // Unix epoch - definitely old
+            size: 1024,
+        };
+        // Entry from Unix epoch should be expired with any reasonable TTL
+        assert!(old_entry.is_expired(7 * 24 * 60 * 60));
+
+        // Edge case: an entry should expire when age > TTL (strictly greater)
+        // Entry 10 seconds old with 5 second TTL should be expired
+        let edge_entry = TransferCacheEntry {
+            hash: "edge".to_string(),
+            remote_path: "/tmp/edge".to_string(),
+            remote_host: "user@host:22".to_string(),
+            transferred_at: now.saturating_sub(10),
+            size: 1024,
+        };
+        assert!(edge_entry.is_expired(5)); // 10 > 5, so expired
+        assert!(!edge_entry.is_expired(15)); // 10 > 15 is false, not expired
+    }
+
+    #[test]
+    fn test_cache_invalidation_by_host() {
+        let mut cache = TransferCache::new();
+
+        // Add entries for two different hosts
+        cache.insert(
+            "hash1".to_string(),
+            "/tmp/1".to_string(),
+            "user@host1:22".to_string(),
+            1024,
+        );
+        cache.insert(
+            "hash2".to_string(),
+            "/tmp/2".to_string(),
+            "user@host2:22".to_string(),
+            1024,
+        );
+        cache.insert(
+            "hash3".to_string(),
+            "/tmp/3".to_string(),
+            "user@host1:22".to_string(),
+            1024,
+        );
+
+        assert_eq!(cache.len(), 3);
+
+        // Invalidate all entries for host1
+        let removed = cache.remove_for_host("user@host1:22");
+        assert_eq!(removed, 2);
+        assert_eq!(cache.len(), 1);
+
+        // Only host2 entry should remain
+        assert!(cache.get("hash2", "user@host2:22").is_some());
+    }
+
+    #[test]
+    fn test_verification_result_match_skips_transfer() {
+        // A Match result should indicate no transfer is needed
+        let result = VerificationResult::Match;
+        assert!(!result.needs_transfer());
+        assert!(result.is_match());
+    }
+
+    #[test]
+    fn test_verification_result_not_found_requires_transfer() {
+        // NotFound should require transfer
+        let result = VerificationResult::NotFound;
+        assert!(result.needs_transfer());
+        assert!(!result.is_match());
+    }
+
+    #[test]
+    fn test_verification_result_mismatch_requires_transfer() {
+        // HashMismatch should require transfer (binary changed)
+        let result = VerificationResult::HashMismatch {
+            expected: "abc123".to_string(),
+            actual: "def456".to_string(),
+        };
+        assert!(result.needs_transfer());
+        assert!(!result.is_match());
+    }
+
+    #[test]
+    fn test_cache_persistence_across_sessions() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let cache_path = temp_dir.path().join("test_cache.json");
+
+        // Session 1: Create and populate cache
+        {
+            let mut cache = TransferCache::new();
+            cache.insert(
+                "persistent_hash".to_string(),
+                "/tmp/persistent".to_string(),
+                "user@host:22".to_string(),
+                1024,
+            );
+            cache.save_to(&cache_path).unwrap();
+        }
+
+        // Session 2: Load cache and verify entry exists
+        {
+            let cache = TransferCache::load_from(&cache_path).unwrap();
+            let entry = cache.get("persistent_hash", "user@host:22");
+            assert!(entry.is_some());
+            assert_eq!(entry.unwrap().remote_path, "/tmp/persistent");
+        }
+    }
 }
