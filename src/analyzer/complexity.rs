@@ -219,7 +219,11 @@ impl ComplexityAnalyzer {
             }
 
             // Check for displacement
-            if op_str.matches(|c: char| c.is_ascii_hexdigit() || c == 'x').count() > 2 {
+            if op_str
+                .matches(|c: char| c.is_ascii_hexdigit() || c == 'x')
+                .count()
+                > 2
+            {
                 score += 1.0;
             }
         }

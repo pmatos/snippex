@@ -184,16 +184,16 @@ impl HexDiffFormatter {
     }
 
     /// Formats as side-by-side comparison.
-    fn format_split(&self, diffs: &[MemoryRegionDiff], base_name: &str, other_name: &str) -> String {
+    fn format_split(
+        &self,
+        diffs: &[MemoryRegionDiff],
+        base_name: &str,
+        other_name: &str,
+    ) -> String {
         let mut output = String::new();
 
         // Header
-        let header = format!(
-            "{:<18} {:<50} {:<50}\n",
-            "Address",
-            base_name,
-            other_name
-        );
+        let header = format!("{:<18} {:<50} {:<50}\n", "Address", base_name, other_name);
         output.push_str(&header);
         output.push_str(&"─".repeat(header.len().saturating_sub(1)));
         output.push('\n');
@@ -240,7 +240,8 @@ impl HexDiffFormatter {
             };
 
             // Format other side
-            let other_hex = self.format_hex_line(other_data, offset, end_offset, &differing_offsets);
+            let other_hex =
+                self.format_hex_line(other_data, offset, end_offset, &differing_offsets);
             let other_ascii = if self.show_ascii {
                 self.format_ascii_line(other_data, offset, end_offset)
             } else {

@@ -32,7 +32,7 @@ impl RegisterCategory {
             RegisterCategory::Vector => "Vector Registers (XMM/YMM/ZMM)",
             RegisterCategory::Control => "Control Registers",
             RegisterCategory::Debug => "Debug Registers",
-            RegisterCategory::Fpu =>"FPU Registers",
+            RegisterCategory::Fpu => "FPU Registers",
             RegisterCategory::Other => "Other Registers",
         }
     }
@@ -45,7 +45,7 @@ impl RegisterCategory {
             RegisterCategory::Flags => 2,
             RegisterCategory::Segment => 3,
             RegisterCategory::Vector => 4,
-            RegisterCategory::Fpu =>5,
+            RegisterCategory::Fpu => 5,
             RegisterCategory::Control => 6,
             RegisterCategory::Debug => 7,
             RegisterCategory::Other => 8,

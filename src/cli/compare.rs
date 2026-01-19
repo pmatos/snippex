@@ -50,7 +50,11 @@ pub struct CompareCommand {
     #[arg(long, help = "Only show memory regions with differences")]
     pub memory_diff_only: bool,
 
-    #[arg(long, value_name = "RANGE", help = "Filter memory to specific range (e.g., 0x10000000-0x10001000)")]
+    #[arg(
+        long,
+        value_name = "RANGE",
+        help = "Filter memory to specific range (e.g., 0x10000000-0x10001000)"
+    )]
     pub memory_range: Option<String>,
 
     #[arg(long, help = "Show flag-by-flag breakdown")]
@@ -590,7 +594,10 @@ impl CompareCommand {
                         "unified" => HexDiffFormat::Unified,
                         "json" => HexDiffFormat::Json,
                         _ => {
-                            eprintln!("Warning: Unknown hex format '{}', using 'split'", hex_format_str);
+                            eprintln!(
+                                "Warning: Unknown hex format '{}', using 'split'",
+                                hex_format_str
+                            );
                             HexDiffFormat::Split
                         }
                     };

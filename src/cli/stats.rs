@@ -315,14 +315,14 @@ impl StatsCommand {
         let blocks = db.get_consistently_failing_blocks(min_failures)?;
 
         if blocks.is_empty() {
-            println!(
-                "No blocks with {} or more failures found.",
-                min_failures
-            );
+            println!("No blocks with {} or more failures found.", min_failures);
             return Ok(());
         }
 
-        println!("\nConsistently Failing Blocks (min {} failures)", min_failures);
+        println!(
+            "\nConsistently Failing Blocks (min {} failures)",
+            min_failures
+        );
         println!("══════════════════════════════════════════════════════════════════════════════");
         println!(
             "{:<6} {:>8} {:>18} {:>18} {:<30}",
@@ -348,7 +348,11 @@ impl StatsCommand {
 
         println!(
             "{:<6} {:>8} 0x{:016x} 0x{:016x} {:<30}",
-            block.extraction_id, block.failure_count, block.start_address, block.end_address, binary
+            block.extraction_id,
+            block.failure_count,
+            block.start_address,
+            block.end_address,
+            binary
         );
     }
 
@@ -356,10 +360,7 @@ impl StatsCommand {
         let blocks = db.get_flaky_blocks(min_runs)?;
 
         if blocks.is_empty() {
-            println!(
-                "No flaky blocks found (min {} runs required).",
-                min_runs
-            );
+            println!("No flaky blocks found (min {} runs required).", min_runs);
             return Ok(());
         }
 

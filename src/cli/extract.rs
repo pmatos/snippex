@@ -414,8 +414,7 @@ impl ExtractCommand {
                     // Instructions derefs to &[Insn], so use &*insns
                     let score = complexity_analyzer.score_block(&insns);
                     let variety = complexity_analyzer.get_instruction_variety(&insns);
-                    let has_problematic =
-                        complexity_analyzer.has_problematic_instructions(&insns);
+                    let has_problematic = complexity_analyzer.has_problematic_instructions(&insns);
 
                     candidates.push(CandidateBlock {
                         start_addr,
@@ -476,7 +475,10 @@ impl ExtractCommand {
         }
 
         if !self.quiet {
-            println!("\n✓ {} block(s) stored in database successfully", selected.len());
+            println!(
+                "\n✓ {} block(s) stored in database successfully",
+                selected.len()
+            );
 
             if self.selection_report {
                 self.print_selection_summary(&selected, &total_instructions);
@@ -537,18 +539,12 @@ impl ExtractCommand {
 
     fn print_block_report(&self, block: &CandidateBlock) {
         println!("    Complexity Score: {:.2}", block.complexity_score.total);
-        println!(
-            "      - Rarity:     {:.2}",
-            block.complexity_score.rarity
-        );
+        println!("      - Rarity:     {:.2}", block.complexity_score.rarity);
         println!(
             "      - Addressing: {:.2}",
             block.complexity_score.addressing
         );
-        println!(
-            "      - Operands:   {:.2}",
-            block.complexity_score.operands
-        );
+        println!("      - Operands:   {:.2}", block.complexity_score.operands);
         println!(
             "    Instruction Variety: {} unique mnemonics",
             block.instruction_variety.len()
@@ -596,8 +592,11 @@ impl ExtractCommand {
         );
 
         // Average complexity
-        let avg_complexity: f64 =
-            selected.iter().map(|b| b.complexity_score.total).sum::<f64>() / selected.len() as f64;
+        let avg_complexity: f64 = selected
+            .iter()
+            .map(|b| b.complexity_score.total)
+            .sum::<f64>()
+            / selected.len() as f64;
         println!("Average complexity score: {:.2}", avg_complexity);
 
         // Show instruction coverage

@@ -288,6 +288,28 @@ impl Database {
             [],
         );
 
+        // Metrics snapshots table for tracking validation success over time
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS metrics_snapshots (
+                id INTEGER PRIMARY KEY,
+                recorded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                total_blocks INTEGER NOT NULL,
+                analyzed_blocks INTEGER NOT NULL,
+                validated_blocks INTEGER NOT NULL,
+                pass_count INTEGER NOT NULL,
+                fail_count INTEGER NOT NULL,
+                skip_count INTEGER NOT NULL,
+                avg_duration_ns INTEGER,
+                notes TEXT
+            )",
+            [],
+        )?;
+
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_metrics_snapshots_recorded ON metrics_snapshots(recorded_at)",
+            [],
+        )?;
+
         Ok(())
     }
 
@@ -1372,7 +1394,10 @@ impl Database {
     }
 
     /// Gets blocks that consistently fail across multiple batch runs.
-    pub fn get_consistently_failing_blocks(&self, min_failures: usize) -> Result<Vec<FailingBlockInfo>> {
+    pub fn get_consistently_failing_blocks(
+        &self,
+        min_failures: usize,
+    ) -> Result<Vec<FailingBlockInfo>> {
         let mut stmt = self.conn.prepare(
             "SELECT d.extraction_id, COUNT(*) as fail_count,
                     e.start_address, e.end_address, b.path
@@ -1479,14 +1504,177 @@ impl Database {
 
     /// Clears all batch statistics.
     pub fn clear_batch_stats(&mut self) -> Result<usize> {
-        let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM batch_runs",
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM batch_runs", [], |row| row.get(0))?;
+
+        self.conn.execute("DELETE FROM batch_run_details", [])?;
+        self.conn.execute("DELETE FROM batch_runs", [])?;
+
+        Ok(count as usize)
+    }
+
+    // ==================== Metrics Snapshot Methods ====================
+
+    /// Records a metrics snapshot of the current validation state.
+    #[allow(dead_code)]
+    pub fn record_metrics_snapshot(&mut self, notes: Option<&str>) -> Result<i64> {
+        // Count total extractions
+        let total_blocks: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM extractions", [], |row| row.get(0))?;
+
+        // Count analyzed blocks
+        let analyzed_blocks: i64 = self.conn.query_row(
+            "SELECT COUNT(DISTINCT extraction_id) FROM analyses",
             [],
             |row| row.get(0),
         )?;
 
-        self.conn.execute("DELETE FROM batch_run_details", [])?;
-        self.conn.execute("DELETE FROM batch_runs", [])?;
+        // Count blocks with validation cache entries
+        let validated_blocks: i64 = self.conn.query_row(
+            "SELECT COUNT(DISTINCT extraction_id) FROM validation_cache",
+            [],
+            |row| row.get(0),
+        )?;
+
+        // Count pass/fail from most recent batch runs
+        let pass_count: i64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(pass_count), 0) FROM batch_runs WHERE completed_at IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let fail_count: i64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(fail_count), 0) FROM batch_runs WHERE completed_at IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let skip_count: i64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(skip_count), 0) FROM batch_runs WHERE completed_at IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )?;
+
+        // Calculate average duration
+        let avg_duration: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT AVG(duration_ns) FROM batch_run_details WHERE status = 'pass'",
+                [],
+                |row| row.get(0),
+            )
+            .ok();
+
+        self.conn.execute(
+            "INSERT INTO metrics_snapshots
+             (total_blocks, analyzed_blocks, validated_blocks, pass_count, fail_count, skip_count, avg_duration_ns, notes)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                total_blocks,
+                analyzed_blocks,
+                validated_blocks,
+                pass_count,
+                fail_count,
+                skip_count,
+                avg_duration,
+                notes
+            ],
+        )?;
+
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Gets the most recent metrics snapshots.
+    #[allow(dead_code)]
+    pub fn get_metrics_snapshots(&self, limit: usize) -> Result<Vec<MetricsSnapshot>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, recorded_at, total_blocks, analyzed_blocks, validated_blocks,
+                    pass_count, fail_count, skip_count, avg_duration_ns, notes
+             FROM metrics_snapshots
+             ORDER BY recorded_at DESC
+             LIMIT ?1",
+        )?;
+
+        let rows = stmt.query_map([limit as i64], |row| {
+            Ok(MetricsSnapshot {
+                id: row.get(0)?,
+                recorded_at: row.get(1)?,
+                total_blocks: row.get::<_, i64>(2)? as usize,
+                analyzed_blocks: row.get::<_, i64>(3)? as usize,
+                validated_blocks: row.get::<_, i64>(4)? as usize,
+                pass_count: row.get::<_, i64>(5)? as usize,
+                fail_count: row.get::<_, i64>(6)? as usize,
+                skip_count: row.get::<_, i64>(7)? as usize,
+                avg_duration_ns: row.get::<_, Option<i64>>(8)?.map(|v| v as u64),
+                notes: row.get(9)?,
+            })
+        })?;
+
+        let mut snapshots = Vec::new();
+        for row in rows {
+            snapshots.push(row?);
+        }
+
+        Ok(snapshots)
+    }
+
+    /// Gets metrics snapshots within a date range.
+    #[allow(dead_code)]
+    pub fn get_metrics_snapshots_in_range(
+        &self,
+        start_date: &str,
+        end_date: &str,
+    ) -> Result<Vec<MetricsSnapshot>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, recorded_at, total_blocks, analyzed_blocks, validated_blocks,
+                    pass_count, fail_count, skip_count, avg_duration_ns, notes
+             FROM metrics_snapshots
+             WHERE recorded_at >= ?1 AND recorded_at <= ?2
+             ORDER BY recorded_at ASC",
+        )?;
+
+        let rows = stmt.query_map([start_date, end_date], |row| {
+            Ok(MetricsSnapshot {
+                id: row.get(0)?,
+                recorded_at: row.get(1)?,
+                total_blocks: row.get::<_, i64>(2)? as usize,
+                analyzed_blocks: row.get::<_, i64>(3)? as usize,
+                validated_blocks: row.get::<_, i64>(4)? as usize,
+                pass_count: row.get::<_, i64>(5)? as usize,
+                fail_count: row.get::<_, i64>(6)? as usize,
+                skip_count: row.get::<_, i64>(7)? as usize,
+                avg_duration_ns: row.get::<_, Option<i64>>(8)?.map(|v| v as u64),
+                notes: row.get(9)?,
+            })
+        })?;
+
+        let mut snapshots = Vec::new();
+        for row in rows {
+            snapshots.push(row?);
+        }
+
+        Ok(snapshots)
+    }
+
+    /// Gets the latest metrics snapshot.
+    #[allow(dead_code)]
+    pub fn get_latest_metrics_snapshot(&self) -> Result<Option<MetricsSnapshot>> {
+        let snapshots = self.get_metrics_snapshots(1)?;
+        Ok(snapshots.into_iter().next())
+    }
+
+    /// Deletes all metrics snapshots.
+    #[allow(dead_code)]
+    pub fn clear_metrics_snapshots(&mut self) -> Result<usize> {
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM metrics_snapshots", [], |row| {
+                row.get(0)
+            })?;
+
+        self.conn.execute("DELETE FROM metrics_snapshots", [])?;
 
         Ok(count as usize)
     }
@@ -1593,4 +1781,41 @@ pub struct FlakyBlockInfo {
 pub struct FailureModeInfo {
     pub mode: String,
     pub count: usize,
+}
+
+/// A snapshot of validation metrics at a point in time.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct MetricsSnapshot {
+    pub id: i64,
+    pub recorded_at: String,
+    pub total_blocks: usize,
+    pub analyzed_blocks: usize,
+    pub validated_blocks: usize,
+    pub pass_count: usize,
+    pub fail_count: usize,
+    pub skip_count: usize,
+    pub avg_duration_ns: Option<u64>,
+    pub notes: Option<String>,
+}
+
+#[allow(dead_code)]
+impl MetricsSnapshot {
+    pub fn pass_rate(&self) -> f64 {
+        let total = self.pass_count + self.fail_count;
+        if total == 0 {
+            0.0
+        } else {
+            (self.pass_count as f64 / total as f64) * 100.0
+        }
+    }
+
+    pub fn fail_rate(&self) -> f64 {
+        let total = self.pass_count + self.fail_count;
+        if total == 0 {
+            0.0
+        } else {
+            (self.fail_count as f64 / total as f64) * 100.0
+        }
+    }
 }
