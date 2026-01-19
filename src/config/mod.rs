@@ -227,7 +227,9 @@ impl Config {
                      • Ensure sufficient disk space",
                     e,
                     path.display(),
-                    path.parent().map(|p| p.display().to_string()).unwrap_or_default()
+                    path.parent()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default()
                 ),
             ))
         })?;

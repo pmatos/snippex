@@ -28,7 +28,7 @@
     "defaultMode": "plan"
   },
   "enableAllProjectMcpServers": true,
-  "model": "claude-sonnet-4-5",
+  "model": "claude-opus-4-5",
   "env": {
     "BASH_DEFAULT_TIMEOUT_MS": "1800000",
     "BASH_MAX_TIMEOUT_MS": "7200000"

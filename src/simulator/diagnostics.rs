@@ -102,10 +102,7 @@ pub fn diagnose_execution_failure(
     // Check for permission issues
     if stderr_lower.contains("permission denied") {
         suggestions.push("• Binary does not have execute permissions".to_string());
-        suggestions.push(format!(
-            "• Try: chmod +x {}",
-            binary_path.display()
-        ));
+        suggestions.push(format!("• Try: chmod +x {}", binary_path.display()));
         suggestions.push("• Check if filesystem is mounted with noexec option".to_string());
     }
     // Check for architecture mismatch
@@ -116,7 +113,8 @@ pub fn diagnose_execution_failure(
         if let Some(emu) = emulator {
             suggestions.push(format!("• Ensure {} is correctly configured", emu));
         } else {
-            suggestions.push("• Consider using an emulator for cross-architecture execution".to_string());
+            suggestions
+                .push("• Consider using an emulator for cross-architecture execution".to_string());
             suggestions.push("• For x86 on ARM64: use FEX-Emu".to_string());
             suggestions.push("• For ARM64 on x86: use QEMU".to_string());
         }
@@ -144,8 +142,11 @@ pub fn diagnose_execution_failure(
         || exit_code == Some(132)
     {
         suggestions.push("• Execution failed with illegal instruction".to_string());
-        suggestions.push("• The block may use CPU instructions not supported on this system".to_string());
-        suggestions.push("• Check if the binary was compiled for a different CPU architecture".to_string());
+        suggestions
+            .push("• The block may use CPU instructions not supported on this system".to_string());
+        suggestions.push(
+            "• Check if the binary was compiled for a different CPU architecture".to_string(),
+        );
     }
     // Check for emulator-specific issues
     else if let Some(emu) = emulator {
@@ -174,7 +175,13 @@ pub fn diagnose_execution_failure(
         suggestions.push("• Check stderr output for details".to_string());
     }
 
-    format_diagnostic_message("Execution failed", binary_path, exit_code, stderr, &suggestions)
+    format_diagnostic_message(
+        "Execution failed",
+        binary_path,
+        exit_code,
+        stderr,
+        &suggestions,
+    )
 }
 
 /// Diagnoses NASM assembly errors and provides helpful suggestions.
@@ -184,8 +191,10 @@ pub fn diagnose_nasm_error(stderr: &str, asm_file: &Path) -> String {
 
     if stderr_lower.contains("no such instruction") {
         suggestions.push("• NASM encountered an unknown instruction".to_string());
-        suggestions.push("• The assembly may contain instructions not supported by NASM".to_string());
-        suggestions.push("• Check if the instruction is x86-specific and properly encoded".to_string());
+        suggestions
+            .push("• The assembly may contain instructions not supported by NASM".to_string());
+        suggestions
+            .push("• Check if the instruction is x86-specific and properly encoded".to_string());
     } else if stderr_lower.contains("symbol") && stderr_lower.contains("undefined") {
         suggestions.push("• Undefined symbol in assembly".to_string());
         suggestions.push("• The extracted block may reference external symbols".to_string());
@@ -199,10 +208,7 @@ pub fn diagnose_nasm_error(stderr: &str, asm_file: &Path) -> String {
         suggestions.push("• Review the generated assembly file for errors".to_string());
     }
 
-    suggestions.push(format!(
-        "• Inspect assembly file: {}",
-        asm_file.display()
-    ));
+    suggestions.push(format!("• Inspect assembly file: {}", asm_file.display()));
     suggestions.push("• Verify NASM version: nasm --version".to_string());
 
     let mut msg = "NASM assembly failed\n\n".to_string();
@@ -232,7 +238,8 @@ pub fn diagnose_linker_error(stderr: &str, obj_file: &Path, output_file: &Path) 
 
     if stderr_lower.contains("undefined reference") {
         suggestions.push("• Linker found undefined symbol references".to_string());
-        suggestions.push("• The assembly may reference symbols not present in the harness".to_string());
+        suggestions
+            .push("• The assembly may reference symbols not present in the harness".to_string());
     } else if stderr_lower.contains("cannot find") {
         suggestions.push("• Linker cannot find required files or libraries".to_string());
         suggestions.push("• Verify the object file was created successfully".to_string());
@@ -248,14 +255,8 @@ pub fn diagnose_linker_error(stderr: &str, obj_file: &Path, output_file: &Path) 
     }
 
     suggestions.push("• Verify linker is installed: ld --version".to_string());
-    suggestions.push(format!(
-        "• Input object file: {}",
-        obj_file.display()
-    ));
-    suggestions.push(format!(
-        "• Output binary: {}",
-        output_file.display()
-    ));
+    suggestions.push(format!("• Input object file: {}", obj_file.display()));
+    suggestions.push(format!("• Output binary: {}", output_file.display()));
 
     let mut msg = "Linker failed\n\n".to_string();
 

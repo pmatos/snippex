@@ -187,7 +187,10 @@ impl ExecutionHarness {
                              • Verify QEMU is properly installed: {} --version\n\
                              • Check the binary is valid for the target architecture\n\
                              • Try running manually: {} {}",
-                            e, binary, binary, binary_path.display()
+                            e,
+                            binary,
+                            binary,
+                            binary_path.display()
                         ))
                     }
                 })?;
@@ -219,7 +222,10 @@ impl ExecutionHarness {
                              • Check rootfs is configured: FEXRootFSFetcher\n\
                              • Ensure the binary is valid x86/x86_64 ELF\n\
                              • Try running manually: {} {}",
-                            e, binary, binary, binary_path.display()
+                            e,
+                            binary,
+                            binary,
+                            binary_path.display()
                         ))
                     }
                 })?;

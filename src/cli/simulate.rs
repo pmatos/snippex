@@ -128,7 +128,8 @@ impl SimulateCommand {
                      Suggestions:\n\
                      • Use native: snippex simulate {} --emulator native\n\
                      • Install the required emulator",
-                    emulator_str, self.block_number
+                    emulator_str,
+                    self.block_number
                 ));
             }
 

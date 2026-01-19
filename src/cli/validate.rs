@@ -4,7 +4,9 @@ use anyhow::{anyhow, Result};
 use clap::Args;
 use std::path::PathBuf;
 
-use crate::arch::{get_effective_architecture, EmulatorDispatcher, ExecutionTarget};
+use crate::arch::{
+    get_effective_architecture, EmulatorDispatcher, ExecutionTarget, FlagComparison,
+};
 use crate::config::Config;
 use crate::db::{CachedValidationResult, Database};
 use crate::remote::{ExecutionPackage, RemoteOrchestrator};
@@ -45,6 +47,9 @@ pub struct ValidateCommand {
 
     #[arg(long, default_value = "7", help = "Cache TTL in days")]
     pub cache_ttl: u32,
+
+    #[arg(long, help = "Show flag-by-flag breakdown")]
+    pub flag_detail: bool,
 }
 
 /// Represents the result of validating a block against both native and FEX-Emu.
@@ -240,16 +245,16 @@ impl ValidateCommand {
         }
 
         // Load analysis
-        let analysis = db
-            .load_block_analysis(extraction.id)?
-            .ok_or_else(|| anyhow!(
+        let analysis = db.load_block_analysis(extraction.id)?.ok_or_else(|| {
+            anyhow!(
                 "Block analysis not found in database\n\n\
                  This is unexpected - the block shows as analyzed but no analysis data exists.\n\n\
                  Suggestions:\n\
                  • Re-analyze this block: snippex analyze {}\n\
                  • Check database integrity",
                 self.block_number
-            ))?;
+            )
+        })?;
 
         println!("Block: {}", extraction.binary_path);
         println!(
@@ -531,6 +536,20 @@ impl ValidateCommand {
                 comp.native_flags,
                 comp.fex_flags
             );
+
+            // Show flag-by-flag breakdown if requested or if flags differ
+            if self.flag_detail || (!comp.flags_match && self.verbose) {
+                let flag_comp = FlagComparison::compare(comp.native_flags, comp.fex_flags);
+                if !flag_comp.all_match() {
+                    println!();
+                    println!("    Flag Breakdown:");
+                    for line in flag_comp.format_table().lines() {
+                        println!("      {}", line);
+                    }
+                } else if self.flag_detail {
+                    println!("    All individual flags match");
+                }
+            }
 
             let reg_count = native_result
                 .as_ref()

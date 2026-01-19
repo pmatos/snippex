@@ -4,5 +4,6 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod extractor;
+pub mod formatting;
 pub mod remote;
 pub mod simulator;

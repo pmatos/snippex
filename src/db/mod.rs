@@ -53,7 +53,9 @@ impl Database {
                  • Ensure sufficient disk space is available",
                 e,
                 path.display(),
-                path.parent().map(|p| p.display().to_string()).unwrap_or_default(),
+                path.parent()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default(),
                 path.display()
             )
         })?;
@@ -197,6 +199,33 @@ impl Database {
 
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_validation_cache_extraction ON validation_cache(extraction_id)",
+            [],
+        )?;
+
+        // Additional indexes for cache optimization
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_validation_cache_composite ON validation_cache(extraction_id, emulator_type, seed)",
+            [],
+        )?;
+
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_validation_cache_created ON validation_cache(created_at)",
+            [],
+        )?;
+
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_validation_cache_emulator ON validation_cache(emulator_type)",
+            [],
+        )?;
+
+        // Migration: Add last_accessed column for LRU eviction
+        let _ = self.conn.execute(
+            "ALTER TABLE validation_cache ADD COLUMN last_accessed DATETIME DEFAULT CURRENT_TIMESTAMP",
+            [],
+        );
+
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_validation_cache_accessed ON validation_cache(last_accessed)",
             [],
         )?;
 
@@ -743,6 +772,7 @@ impl Database {
     }
 
     /// Retrieves a cached validation result if available and not expired.
+    /// Updates last_accessed timestamp on cache hit for LRU eviction.
     pub fn get_validation_cache(
         &self,
         extraction_id: i64,
@@ -753,7 +783,7 @@ impl Database {
         let ttl_seconds = ttl_days as i64 * 24 * 60 * 60;
 
         let mut stmt = self.conn.prepare(
-            "SELECT exit_code, final_registers, final_memory, final_flags, execution_time_ns,
+            "SELECT id, exit_code, final_registers, final_memory, final_flags, execution_time_ns,
                     host_architecture, created_at
              FROM validation_cache
              WHERE extraction_id = ?1
@@ -770,15 +800,17 @@ impl Database {
                 ttl_seconds,
             ],
             |row| {
-                let exit_code: i32 = row.get(0)?;
-                let final_registers_json: String = row.get(1)?;
-                let final_memory_json: String = row.get(2)?;
-                let final_flags: i64 = row.get(3)?;
-                let execution_time_ns: i64 = row.get(4)?;
-                let host_architecture: String = row.get(5)?;
-                let created_at: String = row.get(6)?;
+                let id: i64 = row.get(0)?;
+                let exit_code: i32 = row.get(1)?;
+                let final_registers_json: String = row.get(2)?;
+                let final_memory_json: String = row.get(3)?;
+                let final_flags: i64 = row.get(4)?;
+                let execution_time_ns: i64 = row.get(5)?;
+                let host_architecture: String = row.get(6)?;
+                let created_at: String = row.get(7)?;
 
                 Ok((
+                    id,
                     exit_code,
                     final_registers_json,
                     final_memory_json,
@@ -792,6 +824,7 @@ impl Database {
 
         match result {
             Ok((
+                cache_id,
                 exit_code,
                 final_registers_json,
                 final_memory_json,
@@ -800,6 +833,12 @@ impl Database {
                 host_architecture,
                 created_at,
             )) => {
+                // Update last_accessed timestamp for LRU tracking
+                let _ = self.conn.execute(
+                    "UPDATE validation_cache SET last_accessed = CURRENT_TIMESTAMP WHERE id = ?1",
+                    params![cache_id],
+                );
+
                 let final_registers = serde_json::from_str(&final_registers_json)
                     .map_err(|e| anyhow::anyhow!("Failed to parse cached registers: {}", e))?;
                 let final_memory = serde_json::from_str(&final_memory_json)
@@ -887,7 +926,208 @@ impl Database {
             fex_entries: fex_count as usize,
             oldest_entry: oldest,
             newest_entry: newest,
+            age_distribution: None,
+            estimated_size_bytes: None,
         })
+    }
+
+    /// Gets detailed cache statistics including age distribution.
+    pub fn get_validation_cache_stats_detailed(&self) -> Result<ValidationCacheStats> {
+        let mut stats = self.get_validation_cache_stats()?;
+
+        // Calculate age distribution (buckets: <1d, 1-7d, 7-30d, >30d)
+        let under_1d: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM validation_cache WHERE julianday('now') - julianday(created_at) < 1",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let from_1d_to_7d: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM validation_cache
+             WHERE julianday('now') - julianday(created_at) >= 1
+               AND julianday('now') - julianday(created_at) < 7",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let from_7d_to_30d: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM validation_cache
+             WHERE julianday('now') - julianday(created_at) >= 7
+               AND julianday('now') - julianday(created_at) < 30",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let over_30d: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM validation_cache WHERE julianday('now') - julianday(created_at) >= 30",
+            [],
+            |row| row.get(0),
+        )?;
+
+        stats.age_distribution = Some(CacheAgeDistribution {
+            under_1_day: under_1d as usize,
+            from_1_to_7_days: from_1d_to_7d as usize,
+            from_7_to_30_days: from_7d_to_30d as usize,
+            over_30_days: over_30d as usize,
+        });
+
+        // Estimate cache size (approximate - based on average row size)
+        let avg_row_size: i64 = self.conn.query_row(
+            "SELECT COALESCE(AVG(LENGTH(final_registers) + LENGTH(final_memory)), 0) FROM validation_cache",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(0);
+
+        stats.estimated_size_bytes =
+            Some((stats.total_entries as i64 * (avg_row_size + 100)) as usize);
+
+        Ok(stats)
+    }
+
+    /// Evicts least recently used cache entries to maintain max size.
+    /// Returns the number of entries evicted.
+    pub fn evict_lru_cache(&mut self, max_entries: usize) -> Result<usize> {
+        let current_count: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM validation_cache", [], |row| {
+                    row.get(0)
+                })?;
+
+        if current_count as usize <= max_entries {
+            return Ok(0);
+        }
+
+        let to_evict = current_count as usize - max_entries;
+
+        // Delete the least recently accessed entries
+        let deleted = self.conn.execute(
+            "DELETE FROM validation_cache WHERE id IN (
+                SELECT id FROM validation_cache
+                ORDER BY COALESCE(last_accessed, created_at) ASC
+                LIMIT ?1
+            )",
+            params![to_evict as i64],
+        )?;
+
+        Ok(deleted)
+    }
+
+    /// Pre-fetches cache entries for a batch of extraction IDs.
+    /// Returns a map of (extraction_id, emulator_type) -> cached result.
+    #[allow(dead_code)]
+    pub fn prefetch_cache_batch(
+        &self,
+        extraction_ids: &[i64],
+        emulator_type: &str,
+        seed: Option<u64>,
+        ttl_days: u32,
+    ) -> Result<std::collections::HashMap<i64, CachedValidationResult>> {
+        use std::collections::HashMap;
+
+        if extraction_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let ttl_seconds = ttl_days as i64 * 24 * 60 * 60;
+
+        // Build IN clause placeholders
+        let placeholders: Vec<String> = extraction_ids.iter().map(|_| "?".to_string()).collect();
+        let in_clause = placeholders.join(",");
+
+        let query = format!(
+            "SELECT id, extraction_id, exit_code, final_registers, final_memory, final_flags,
+                    execution_time_ns, host_architecture, created_at
+             FROM validation_cache
+             WHERE extraction_id IN ({})
+               AND emulator_type = ?
+               AND ((?{} IS NULL AND seed IS NULL) OR seed = ?{})
+               AND julianday('now') - julianday(created_at) < ? / 86400.0",
+            in_clause,
+            placeholders.len() + 2,
+            placeholders.len() + 2
+        );
+
+        let mut stmt = self.conn.prepare(&query)?;
+
+        // Build params: extraction_ids... + emulator_type + seed + seed + ttl_seconds
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = extraction_ids
+            .iter()
+            .map(|id| Box::new(*id) as Box<dyn rusqlite::ToSql>)
+            .collect();
+        params_vec.push(Box::new(emulator_type.to_string()));
+        params_vec.push(Box::new(seed.map(|s| s as i64)));
+        params_vec.push(Box::new(seed.map(|s| s as i64)));
+        params_vec.push(Box::new(ttl_seconds));
+
+        let params_slice: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+
+        let mut results = HashMap::new();
+        let mut cache_ids = Vec::new();
+
+        {
+            let mut rows = stmt.query(params_slice.as_slice())?;
+
+            while let Some(row) = rows.next()? {
+                let cache_id: i64 = row.get(0)?;
+                let extraction_id: i64 = row.get(1)?;
+                let exit_code: i32 = row.get(2)?;
+                let final_registers_json: String = row.get(3)?;
+                let final_memory_json: String = row.get(4)?;
+                let final_flags: i64 = row.get(5)?;
+                let execution_time_ns: i64 = row.get(6)?;
+                let host_architecture: String = row.get(7)?;
+                let created_at: String = row.get(8)?;
+
+                let final_registers: std::collections::HashMap<String, u64> =
+                    serde_json::from_str(&final_registers_json).unwrap_or_default();
+                let final_memory: std::collections::HashMap<u64, Vec<u8>> =
+                    serde_json::from_str(&final_memory_json).unwrap_or_default();
+
+                let cached = CachedValidationResult {
+                    exit_code,
+                    final_state: crate::simulator::FinalState {
+                        registers: final_registers,
+                        memory_locations: final_memory,
+                        flags: final_flags as u64,
+                    },
+                    execution_time: std::time::Duration::from_nanos(execution_time_ns as u64),
+                    host_architecture,
+                    cached_at: created_at,
+                };
+
+                results.insert(extraction_id, cached);
+                cache_ids.push(cache_id);
+            }
+        }
+
+        // Update last_accessed for all fetched entries
+        if !cache_ids.is_empty() {
+            let id_placeholders: Vec<String> = cache_ids.iter().map(|_| "?".to_string()).collect();
+            let update_query = format!(
+                "UPDATE validation_cache SET last_accessed = CURRENT_TIMESTAMP WHERE id IN ({})",
+                id_placeholders.join(",")
+            );
+            let mut update_stmt = self.conn.prepare(&update_query)?;
+            let update_params: Vec<&dyn rusqlite::ToSql> = cache_ids
+                .iter()
+                .map(|id| id as &dyn rusqlite::ToSql)
+                .collect();
+            let _ = update_stmt.execute(update_params.as_slice());
+        }
+
+        Ok(results)
+    }
+
+    /// Gets the number of unique extractions in the cache.
+    #[allow(dead_code)]
+    pub fn get_cache_extraction_count(&self) -> Result<usize> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(DISTINCT extraction_id) FROM validation_cache",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(count as usize)
     }
 }
 
@@ -910,4 +1150,15 @@ pub struct ValidationCacheStats {
     pub fex_entries: usize,
     pub oldest_entry: Option<String>,
     pub newest_entry: Option<String>,
+    pub age_distribution: Option<CacheAgeDistribution>,
+    pub estimated_size_bytes: Option<usize>,
+}
+
+/// Age distribution of cache entries.
+#[derive(Debug, Clone)]
+pub struct CacheAgeDistribution {
+    pub under_1_day: usize,
+    pub from_1_to_7_days: usize,
+    pub from_7_to_30_days: usize,
+    pub over_30_days: usize,
 }

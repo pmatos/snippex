@@ -3,7 +3,9 @@ use clap::Args;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::arch::FlagComparison;
 use crate::db::Database;
+use crate::formatting::{HexDiffFormat, HexDiffFormatter, RegisterDiffFormatter};
 use crate::simulator::SimulationResult;
 
 #[derive(Args)]
@@ -29,8 +31,33 @@ pub struct CompareCommand {
     #[arg(long, help = "Show detailed register differences")]
     pub detailed_registers: bool,
 
+    #[arg(long, help = "Show all registers (not just differing ones)")]
+    pub show_all_registers: bool,
+
+    #[arg(long, help = "Show bit-level difference highlighting")]
+    pub bit_diff: bool,
+
     #[arg(long, help = "Show detailed memory differences")]
     pub detailed_memory: bool,
+
+    #[arg(
+        long,
+        value_name = "FORMAT",
+        help = "Show memory hex diff (split, unified, or json)"
+    )]
+    pub hex_format: Option<String>,
+
+    #[arg(long, help = "Only show memory regions with differences")]
+    pub memory_diff_only: bool,
+
+    #[arg(long, value_name = "RANGE", help = "Filter memory to specific range (e.g., 0x10000000-0x10001000)")]
+    pub memory_range: Option<String>,
+
+    #[arg(long, help = "Show flag-by-flag breakdown")]
+    pub flag_detail: bool,
+
+    #[arg(long, help = "Disable colored output")]
+    pub no_color: bool,
 
     #[arg(long, help = "Export comparison to JSON file")]
     pub export_json: Option<PathBuf>,
@@ -155,6 +182,7 @@ impl CompareCommand {
             register_differences: HashMap::new(),
             memory_differences: HashMap::new(),
             execution_differences: HashMap::new(),
+            flag_comparisons: HashMap::new(),
             consensus: None,
         };
 
@@ -204,7 +232,15 @@ impl CompareCommand {
                     execution_time_ratio: other_sim.execution_time.as_nanos() as f64
                         / base_sim.execution_time.as_nanos() as f64,
                 };
-                comparison.execution_differences.insert(key, exec_diff);
+                comparison
+                    .execution_differences
+                    .insert(key.clone(), exec_diff);
+
+                let flag_comparison = FlagComparison::compare(
+                    base_sim.final_state.flags,
+                    other_sim.final_state.flags,
+                );
+                comparison.flag_comparisons.insert(key, flag_comparison);
             }
         }
 
@@ -219,30 +255,44 @@ impl CompareCommand {
         base: &HashMap<String, u64>,
         other: &HashMap<String, u64>,
     ) -> RegisterDifference {
-        let mut differences = Vec::new();
-        let mut all_registers: std::collections::HashSet<String> = base.keys().cloned().collect();
-        all_registers.extend(other.keys().cloned());
+        use crate::formatting::diff::categorize_register;
 
-        for register in all_registers {
-            let base_value = base.get(&register).copied();
-            let other_value = other.get(&register).copied();
+        let formatter = RegisterDiffFormatter::new()
+            .with_colors(!self.no_color)
+            .show_all(self.show_all_registers);
 
-            if base_value != other_value {
-                differences.push(RegisterValueDiff {
-                    register: register.clone(),
-                    base_value,
-                    other_value,
-                });
-            }
-        }
+        let detailed_diffs = formatter.create_diffs(base, other);
+
+        let differences: Vec<RegisterValueDiff> = detailed_diffs
+            .iter()
+            .filter(|d| d.differs || self.show_all_registers)
+            .map(|d| RegisterValueDiff {
+                register: d.register.clone(),
+                category: format!("{:?}", categorize_register(&d.register)),
+                base_value: d.base_value,
+                other_value: d.other_value,
+                differing_bits: d.differing_bits,
+                delta: d.signed_delta,
+            })
+            .collect();
+
+        let total_differences = detailed_diffs.iter().filter(|d| d.differs).count();
+
+        let detailed_json = if self.detailed_registers {
+            Some(formatter.format_json(&detailed_diffs))
+        } else {
+            None
+        };
 
         RegisterDifference {
-            total_differences: differences.len(),
+            total_differences,
+            total_registers: detailed_diffs.len(),
             differences: if self.detailed_registers {
                 differences
             } else {
                 Vec::new()
             },
+            detailed_json,
         }
     }
 
@@ -376,16 +426,149 @@ impl CompareCommand {
         if !comparison.register_differences.is_empty() {
             println!("Register Differences:");
             for (comparison_name, diff) in &comparison.register_differences {
-                println!(
-                    "  {}: {} differences",
-                    comparison_name, diff.total_differences
-                );
+                if self.show_all_registers {
+                    println!(
+                        "  {}: {} differing out of {} total registers",
+                        comparison_name, diff.total_differences, diff.total_registers
+                    );
+                } else {
+                    println!(
+                        "  {}: {} differences",
+                        comparison_name, diff.total_differences
+                    );
+                }
+
                 if self.detailed_registers && !diff.differences.is_empty() {
+                    println!();
+                    // Print table header
+                    println!(
+                        "    {:<12} {:>20}  {:>20}  Status",
+                        "Register", "Base", "Other"
+                    );
+                    println!("    {}", "─".repeat(66));
+
+                    let mut current_category = String::new();
                     for reg_diff in &diff.differences {
+                        // Print category header when it changes
+                        if reg_diff.category != current_category {
+                            if !current_category.is_empty() {
+                                println!();
+                            }
+                            if self.no_color {
+                                println!("    [{}]", reg_diff.category);
+                            } else {
+                                println!("    \x1b[1;34m[{}]\x1b[0m", reg_diff.category);
+                            }
+                            current_category = reg_diff.category.clone();
+                        }
+
+                        let base_str = reg_diff
+                            .base_value
+                            .map(|v| format!("0x{:016X}", v))
+                            .unwrap_or_else(|| "(not present)".to_string());
+
+                        let other_str = reg_diff
+                            .other_value
+                            .map(|v| format!("0x{:016X}", v))
+                            .unwrap_or_else(|| "(not present)".to_string());
+
+                        let (status, delta_str) = match (reg_diff.base_value, reg_diff.other_value)
+                        {
+                            (Some(b), Some(o)) if b == o => {
+                                if self.no_color {
+                                    ("✓".to_string(), String::new())
+                                } else {
+                                    ("\x1b[32m✓\x1b[0m".to_string(), String::new())
+                                }
+                            }
+                            (Some(_), Some(_)) => {
+                                let delta = reg_diff
+                                    .delta
+                                    .map(|d| {
+                                        if d >= 0 {
+                                            format!(" (+{})", d)
+                                        } else {
+                                            format!(" ({})", d)
+                                        }
+                                    })
+                                    .unwrap_or_default();
+                                if self.no_color {
+                                    ("✗".to_string(), delta)
+                                } else {
+                                    ("\x1b[31m✗\x1b[0m".to_string(), delta)
+                                }
+                            }
+                            _ => {
+                                if self.no_color {
+                                    ("✗".to_string(), " (missing)".to_string())
+                                } else {
+                                    ("\x1b[31m✗\x1b[0m".to_string(), " (missing)".to_string())
+                                }
+                            }
+                        };
+
                         println!(
-                            "    {}: {:?} vs {:?}",
-                            reg_diff.register, reg_diff.base_value, reg_diff.other_value
+                            "    {:<12} {:>20}  {:>20}  {}{}",
+                            reg_diff.register, base_str, other_str, status, delta_str
                         );
+
+                        // Show bit-level diff if requested
+                        if self.bit_diff {
+                            if let (Some(base), Some(other)) =
+                                (reg_diff.base_value, reg_diff.other_value)
+                            {
+                                if base != other {
+                                    let xor = base ^ other;
+                                    let base_grouped = format!(
+                                        "{:04X}_{:04X}_{:04X}_{:04X}",
+                                        (base >> 48) & 0xFFFF,
+                                        (base >> 32) & 0xFFFF,
+                                        (base >> 16) & 0xFFFF,
+                                        base & 0xFFFF
+                                    );
+                                    let other_grouped = format!(
+                                        "{:04X}_{:04X}_{:04X}_{:04X}",
+                                        (other >> 48) & 0xFFFF,
+                                        (other >> 32) & 0xFFFF,
+                                        (other >> 16) & 0xFFFF,
+                                        other & 0xFFFF
+                                    );
+
+                                    // Create highlight line
+                                    let mut highlight = String::with_capacity(23);
+                                    for group in 0..4 {
+                                        if group > 0 {
+                                            highlight.push(' ');
+                                        }
+                                        for nibble in 0..4 {
+                                            let shift = (3 - group) * 16 + (3 - nibble) * 4;
+                                            let nibble_xor = (xor >> shift) & 0xF;
+                                            if nibble_xor != 0 {
+                                                highlight.push('^');
+                                            } else {
+                                                highlight.push(' ');
+                                            }
+                                        }
+                                    }
+
+                                    println!(
+                                        "               Bit diff: {} vs {}",
+                                        base_grouped, other_grouped
+                                    );
+                                    if self.no_color {
+                                        println!(
+                                            "                         {}    {}",
+                                            highlight, highlight
+                                        );
+                                    } else {
+                                        println!(
+                                            "                         \x1b[33m{}\x1b[0m    \x1b[33m{}\x1b[0m",
+                                            highlight, highlight
+                                        );
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -399,7 +582,59 @@ impl CompareCommand {
                     "  {}: {} differences",
                     comparison_name, diff.total_differences
                 );
-                if self.detailed_memory && !diff.differences.is_empty() {
+
+                // Check if hex diff formatting is requested
+                if let Some(ref hex_format_str) = self.hex_format {
+                    let format = match hex_format_str.to_lowercase().as_str() {
+                        "split" => HexDiffFormat::Split,
+                        "unified" => HexDiffFormat::Unified,
+                        "json" => HexDiffFormat::Json,
+                        _ => {
+                            eprintln!("Warning: Unknown hex format '{}', using 'split'", hex_format_str);
+                            HexDiffFormat::Split
+                        }
+                    };
+
+                    let formatter = HexDiffFormatter::new()
+                        .with_colors(!self.no_color)
+                        .with_format(format);
+
+                    // Convert MemoryValueDiff to format expected by HexDiffFormatter
+                    let mut base_map = HashMap::new();
+                    let mut other_map = HashMap::new();
+
+                    for mem_diff in &diff.differences {
+                        if let Some(ref data) = mem_diff.base_data {
+                            base_map.insert(mem_diff.address, data.clone());
+                        }
+                        if let Some(ref data) = mem_diff.other_data {
+                            other_map.insert(mem_diff.address, data.clone());
+                        }
+                    }
+
+                    let mut hex_diffs = formatter.create_diffs(&base_map, &other_map);
+
+                    // Apply filters
+                    if self.memory_diff_only {
+                        hex_diffs = HexDiffFormatter::filter_differing(hex_diffs);
+                    }
+
+                    if let Some(ref range_str) = self.memory_range {
+                        if let Some((start, end)) = Self::parse_memory_range(range_str) {
+                            hex_diffs = HexDiffFormatter::filter_by_range(hex_diffs, start, end);
+                        } else {
+                            eprintln!("Warning: Invalid memory range format '{}'", range_str);
+                        }
+                    }
+
+                    let parts: Vec<&str> = comparison_name.split(" vs ").collect();
+                    let base_name = parts.first().unwrap_or(&"Base");
+                    let other_name = parts.get(1).unwrap_or(&"Other");
+
+                    let formatted = formatter.format(&hex_diffs, base_name, other_name);
+                    println!("{}", formatted);
+                } else if self.detailed_memory && !diff.differences.is_empty() {
+                    // Legacy simple output
                     for mem_diff in &diff.differences {
                         println!(
                             "    0x{:016x}: {:?} vs {:?}",
@@ -428,7 +663,51 @@ impl CompareCommand {
             println!();
         }
 
+        // Flag-by-flag breakdown
+        if self.flag_detail && !comparison.flag_comparisons.is_empty() {
+            println!("Flag-by-Flag Breakdown:");
+            for (comparison_name, flag_comp) in &comparison.flag_comparisons {
+                println!("  {}:", comparison_name);
+                if flag_comp.all_match() {
+                    println!("    All flags match ✓");
+                } else {
+                    println!("    {}", flag_comp.summary());
+                    println!();
+                    for line in flag_comp.format_table().lines() {
+                        println!("    {}", line);
+                    }
+                }
+            }
+            println!();
+        }
+
         Ok(())
+    }
+
+    /// Parse a memory range string like "0x10000000-0x10001000" into start and end addresses.
+    fn parse_memory_range(range_str: &str) -> Option<(u64, u64)> {
+        let parts: Vec<&str> = range_str.split('-').collect();
+        if parts.len() != 2 {
+            return None;
+        }
+
+        let start = if let Some(hex_str) = parts[0].strip_prefix("0x") {
+            u64::from_str_radix(hex_str, 16).ok()?
+        } else {
+            parts[0].parse::<u64>().ok()?
+        };
+
+        let end = if let Some(hex_str) = parts[1].strip_prefix("0x") {
+            u64::from_str_radix(hex_str, 16).ok()?
+        } else {
+            parts[1].parse::<u64>().ok()?
+        };
+
+        if start >= end {
+            return None;
+        }
+
+        Some((start, end))
     }
 }
 
@@ -440,6 +719,7 @@ struct ComparisonResult {
     register_differences: HashMap<String, RegisterDifference>,
     memory_differences: HashMap<String, MemoryDifference>,
     execution_differences: HashMap<String, ExecutionDifference>,
+    flag_comparisons: HashMap<String, FlagComparison>,
     consensus: Option<Consensus>,
 }
 
@@ -456,14 +736,22 @@ struct EmulatorSummary {
 #[derive(Debug, serde::Serialize)]
 struct RegisterDifference {
     total_differences: usize,
+    total_registers: usize,
     differences: Vec<RegisterValueDiff>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detailed_json: Option<serde_json::Value>,
 }
 
 #[derive(Debug, serde::Serialize)]
 struct RegisterValueDiff {
     register: String,
+    category: String,
     base_value: Option<u64>,
     other_value: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    differing_bits: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delta: Option<i64>,
 }
 
 #[derive(Debug, serde::Serialize)]

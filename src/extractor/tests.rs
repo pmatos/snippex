@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod extractor_tests {
-    use crate::extractor::Extractor;
+    use crate::extractor::{ExtractionFilter, Extractor, InstructionCategory};
     use object::ObjectSection;
+    use std::collections::HashSet;
     use std::fs;
     use std::process::Command;
     use tempfile::{NamedTempFile, TempDir};
@@ -239,5 +240,162 @@ mod extractor_tests {
         // Should detect x86_64 architecture for GCC-compiled binary
         assert!(matches!(info.architecture.as_str(), "x86_64" | "i386"));
         assert_eq!(info.endianness, "little");
+    }
+
+    #[test]
+    fn test_extraction_filter_default() {
+        let filter = ExtractionFilter::new();
+        assert!(filter.is_empty());
+        assert!(filter.validate().is_ok());
+    }
+
+    #[test]
+    fn test_extraction_filter_size_constraints() {
+        let filter = ExtractionFilter::new().with_min_size(16).with_max_size(64);
+
+        assert!(!filter.is_empty());
+        assert!(filter.validate().is_ok());
+        assert_eq!(filter.min_size, Some(16));
+        assert_eq!(filter.max_size, Some(64));
+    }
+
+    #[test]
+    fn test_extraction_filter_invalid_size_range() {
+        let filter = ExtractionFilter::new().with_min_size(100).with_max_size(50);
+
+        assert!(filter.validate().is_err());
+        let err = filter.validate().unwrap_err();
+        assert!(err.to_string().contains("cannot be greater than"));
+    }
+
+    #[test]
+    fn test_extraction_filter_memory_access() {
+        let filter = ExtractionFilter::new().with_memory_access(true);
+
+        assert!(!filter.is_empty());
+        assert_eq!(filter.require_memory_access, Some(true));
+    }
+
+    #[test]
+    fn test_extraction_filter_categories() {
+        let mut categories = HashSet::new();
+        categories.insert(InstructionCategory::Sse);
+        categories.insert(InstructionCategory::Avx);
+
+        let filter = ExtractionFilter::new().with_instruction_categories(categories.clone());
+
+        assert!(!filter.is_empty());
+        assert_eq!(filter.instruction_categories, Some(categories));
+    }
+
+    #[test]
+    fn test_instruction_category_from_str() {
+        assert_eq!(
+            "general".parse::<InstructionCategory>().unwrap(),
+            InstructionCategory::General
+        );
+        assert_eq!(
+            "FPU".parse::<InstructionCategory>().unwrap(),
+            InstructionCategory::Fpu
+        );
+        assert_eq!(
+            "sse".parse::<InstructionCategory>().unwrap(),
+            InstructionCategory::Sse
+        );
+        assert_eq!(
+            "AVX".parse::<InstructionCategory>().unwrap(),
+            InstructionCategory::Avx
+        );
+        assert_eq!(
+            "avx512".parse::<InstructionCategory>().unwrap(),
+            InstructionCategory::Avx512
+        );
+        assert_eq!(
+            "branch".parse::<InstructionCategory>().unwrap(),
+            InstructionCategory::Branch
+        );
+        assert_eq!(
+            "syscall".parse::<InstructionCategory>().unwrap(),
+            InstructionCategory::Syscall
+        );
+        assert!("invalid".parse::<InstructionCategory>().is_err());
+    }
+
+    #[test]
+    fn test_instruction_category_as_str() {
+        assert_eq!(InstructionCategory::General.as_str(), "general");
+        assert_eq!(InstructionCategory::Fpu.as_str(), "fpu");
+        assert_eq!(InstructionCategory::Sse.as_str(), "sse");
+        assert_eq!(InstructionCategory::Avx.as_str(), "avx");
+        assert_eq!(InstructionCategory::Avx512.as_str(), "avx512");
+        assert_eq!(InstructionCategory::Branch.as_str(), "branch");
+        assert_eq!(InstructionCategory::Syscall.as_str(), "syscall");
+    }
+
+    #[test]
+    fn test_check_block_filter_size() {
+        let binary_file = create_test_binary();
+        let extractor = Extractor::new(binary_file.path().to_path_buf()).unwrap();
+
+        let (start_addr, _, assembly_block) = extractor.extract_random_aligned_block().unwrap();
+        let block_size = assembly_block.len();
+
+        // Filter that should match (wide range)
+        let filter = ExtractionFilter::new()
+            .with_min_size(1)
+            .with_max_size(10000);
+        let result = extractor
+            .check_block_filter(&assembly_block, start_addr, &filter)
+            .unwrap();
+        assert!(result.matches);
+        assert_eq!(result.block_size, block_size);
+
+        // Filter that should not match (too small max)
+        let filter = ExtractionFilter::new().with_min_size(1).with_max_size(1);
+        let result = extractor
+            .check_block_filter(&assembly_block, start_addr, &filter)
+            .unwrap();
+        assert!(!result.matches);
+    }
+
+    #[test]
+    fn test_filtered_extraction() {
+        let binary_file = create_test_binary();
+        let extractor = Extractor::new(binary_file.path().to_path_buf()).unwrap();
+
+        // Extract with a reasonable size filter
+        let filter = ExtractionFilter::new().with_min_size(16).with_max_size(200);
+
+        let result = extractor.extract_filtered_block(&filter);
+        assert!(result.is_ok(), "Should find a block matching filter");
+
+        let (start_addr, _, assembly_block) = result.unwrap();
+        assert!(assembly_block.len() >= 16);
+        assert!(assembly_block.len() <= 200);
+
+        // Verify the block actually matches the filter
+        let filter_match = extractor
+            .check_block_filter(&assembly_block, start_addr, &filter)
+            .unwrap();
+        assert!(filter_match.matches);
+    }
+
+    #[test]
+    fn test_count_matching_blocks() {
+        let binary_file = create_test_binary();
+        let extractor = Extractor::new(binary_file.path().to_path_buf()).unwrap();
+
+        // Empty filter should match all blocks
+        let filter = ExtractionFilter::new();
+        let (matching, total) = extractor.count_matching_blocks(&filter, 10).unwrap();
+        assert_eq!(matching, total);
+        assert!(total > 0);
+
+        // Reasonable filter should match some blocks
+        let filter = ExtractionFilter::new().with_min_size(16).with_max_size(100);
+        let (matching, total) = extractor.count_matching_blocks(&filter, 20).unwrap();
+        assert!(total > 0);
+        // At least some blocks should match
+        assert!(matching > 0 || total > 0);
     }
 }

@@ -11,11 +11,13 @@ use crate::remote::cleanup::CleanupRegistry;
 use crate::remote::diagnostics::diagnose_remote_execution_failure;
 use crate::remote::executor::SSHExecutor;
 use crate::remote::package::ExecutionPackage;
+use crate::remote::pool::SSHConnectionPool;
 use crate::remote::transfer::SCPTransfer;
 use crate::simulator::SimulationResult;
 use log::{debug, info};
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 use tempfile::TempDir;
 
 /// Orchestrates remote execution of simulation packages.
@@ -24,6 +26,7 @@ pub struct RemoteOrchestrator {
     ssh_executor: SSHExecutor,
     scp_transfer: SCPTransfer,
     cleanup_registry: Option<CleanupRegistry>,
+    connection_pool: Option<Arc<SSHConnectionPool>>,
 }
 
 impl RemoteOrchestrator {
@@ -37,6 +40,7 @@ impl RemoteOrchestrator {
             ssh_executor,
             scp_transfer,
             cleanup_registry: None,
+            connection_pool: None,
         }
     }
 
@@ -50,6 +54,28 @@ impl RemoteOrchestrator {
             ssh_executor,
             scp_transfer,
             cleanup_registry: Some(registry),
+            connection_pool: None,
+        }
+    }
+
+    /// Creates a new remote orchestrator with a shared connection pool.
+    ///
+    /// Using a connection pool allows reusing SSH connections across multiple
+    /// executions, which significantly reduces overhead in batch operations.
+    pub fn with_connection_pool(
+        config: RemoteConfig,
+        pool: Arc<SSHConnectionPool>,
+        cleanup_registry: Option<CleanupRegistry>,
+    ) -> Self {
+        let ssh_executor = SSHExecutor::new(config.clone());
+        let scp_transfer = SCPTransfer::new(config.clone());
+
+        Self {
+            config,
+            ssh_executor,
+            scp_transfer,
+            cleanup_registry,
+            connection_pool: Some(pool),
         }
     }
 
@@ -152,8 +178,15 @@ impl RemoteOrchestrator {
 
         debug!("Executing remote command: {}", remote_command);
 
-        // Execute command
-        let exec_result = self.ssh_executor.execute(&remote_command)?;
+        // Execute command using connection pool if available, otherwise use SSH executor
+        let exec_result = if let Some(ref pool) = self.connection_pool {
+            debug!("Using connection pool for execution");
+            let guard = pool.acquire(&self.config)?;
+            guard.execute(&remote_command)?
+        } else {
+            debug!("Using direct SSH connection for execution");
+            self.ssh_executor.execute(&remote_command)?
+        };
 
         if !exec_result.is_success() {
             let diagnosis = diagnose_remote_execution_failure(
@@ -238,6 +271,16 @@ impl RemoteOrchestrator {
     pub fn test_connection(&self) -> Result<()> {
         info!("Testing connection to {}", self.config.connection_string());
         self.ssh_executor.test_connection()
+    }
+
+    /// Returns true if connection pooling is enabled.
+    pub fn has_connection_pool(&self) -> bool {
+        self.connection_pool.is_some()
+    }
+
+    /// Gets connection pool statistics if pooling is enabled.
+    pub fn pool_stats(&self) -> Option<Result<crate::remote::pool::PoolStats>> {
+        self.connection_pool.as_ref().map(|pool| pool.stats())
     }
 }
 

@@ -1,5 +1,15 @@
+pub mod csv;
+pub mod html;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+#[allow(unused_imports)]
+pub use csv::{
+    BlockMetadataRow, CsvExportConfig, CsvExporter, SimulationResultRow, ValidationResultRow,
+};
+#[allow(unused_imports)]
+pub use html::{BlockValidationResult, HtmlReportGenerator};
 
 use crate::analyzer::BlockAnalysis;
 use crate::db::{BinaryInfo, ExtractionInfo};

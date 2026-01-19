@@ -4,6 +4,10 @@
 //! architecture and routing execution to appropriate targets (local or remote).
 
 pub mod dispatcher;
+pub mod flags;
+
+#[allow(unused_imports)]
+pub use flags::{FlagComparison, X86Flags};
 
 #[allow(unused_imports)] // Will be used in Phase 3.3 validate command
 pub use dispatcher::{EmulatorDispatcher, ExecutionTarget};

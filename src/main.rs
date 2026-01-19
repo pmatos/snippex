@@ -10,6 +10,7 @@ mod db;
 mod error;
 mod export;
 mod extractor;
+mod formatting;
 mod remote;
 mod simulator;
 

@@ -1,8 +1,13 @@
+pub mod complexity;
+
 use anyhow::{anyhow, Result};
 use capstone::prelude::*;
 use capstone::{Capstone, Insn, InsnGroupId};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+
+#[allow(unused_imports)]
+pub use complexity::{ComplexityAnalyzer, ComplexityScore};
 
 /// Information about how a register is used as a memory pointer
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

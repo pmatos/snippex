@@ -3,6 +3,7 @@ use capstone::prelude::*;
 use object::{Architecture, BinaryFormat, Object, ObjectSection, ObjectSegment, SectionKind};
 use rand::Rng;
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
@@ -10,6 +11,121 @@ use crate::db::BinaryInfo;
 use crate::error::SnippexError;
 
 const MIN_BLOCK_SIZE: usize = 16;
+const MAX_FILTER_ATTEMPTS: usize = 1000;
+
+/// Instruction categories for filtering
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InstructionCategory {
+    General,
+    Fpu,
+    Sse,
+    Avx,
+    Avx512,
+    Branch,
+    Syscall,
+}
+
+impl std::str::FromStr for InstructionCategory {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "general" => Ok(Self::General),
+            "fpu" | "x87" => Ok(Self::Fpu),
+            "sse" | "sse2" | "sse3" | "sse4" | "ssse3" => Ok(Self::Sse),
+            "avx" | "avx2" => Ok(Self::Avx),
+            "avx512" => Ok(Self::Avx512),
+            "branch" | "jump" => Ok(Self::Branch),
+            "syscall" | "system" => Ok(Self::Syscall),
+            _ => Err(format!("Unknown instruction category: {}", s)),
+        }
+    }
+}
+
+impl InstructionCategory {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::General => "general",
+            Self::Fpu => "fpu",
+            Self::Sse => "sse",
+            Self::Avx => "avx",
+            Self::Avx512 => "avx512",
+            Self::Branch => "branch",
+            Self::Syscall => "syscall",
+        }
+    }
+}
+
+/// Extraction filter configuration
+#[derive(Debug, Clone, Default)]
+pub struct ExtractionFilter {
+    /// Minimum block size in bytes
+    pub min_size: Option<usize>,
+    /// Maximum block size in bytes
+    pub max_size: Option<usize>,
+    /// Require memory access instructions
+    pub require_memory_access: Option<bool>,
+    /// Required instruction categories (any match)
+    pub instruction_categories: Option<HashSet<InstructionCategory>>,
+}
+
+impl ExtractionFilter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_min_size(mut self, size: usize) -> Self {
+        self.min_size = Some(size);
+        self
+    }
+
+    pub fn with_max_size(mut self, size: usize) -> Self {
+        self.max_size = Some(size);
+        self
+    }
+
+    pub fn with_memory_access(mut self, require: bool) -> Self {
+        self.require_memory_access = Some(require);
+        self
+    }
+
+    pub fn with_instruction_categories(mut self, categories: HashSet<InstructionCategory>) -> Self {
+        self.instruction_categories = Some(categories);
+        self
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.min_size.is_none()
+            && self.max_size.is_none()
+            && self.require_memory_access.is_none()
+            && self.instruction_categories.is_none()
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if let (Some(min), Some(max)) = (self.min_size, self.max_size) {
+            if min > max {
+                return Err(anyhow::anyhow!(
+                    "min-size ({}) cannot be greater than max-size ({})",
+                    min,
+                    max
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Result of checking if a block matches filter criteria
+#[derive(Debug)]
+pub struct FilterMatch {
+    pub matches: bool,
+    #[allow(dead_code)]
+    pub block_size: usize,
+    pub has_memory_access: bool,
+    pub categories_found: HashSet<InstructionCategory>,
+    #[allow(dead_code)]
+    pub instruction_count: usize,
+}
 
 pub mod section_loader;
 
@@ -406,5 +522,300 @@ impl Extractor {
         }
 
         Ok((start_addr, end_addr, assembly_block))
+    }
+
+    /// Extract a random block that matches the given filter criteria.
+    /// Will attempt up to MAX_FILTER_ATTEMPTS times to find a matching block.
+    pub fn extract_filtered_block(&self, filter: &ExtractionFilter) -> Result<(u64, u64, Vec<u8>)> {
+        filter.validate()?;
+
+        if filter.is_empty() {
+            return self.extract_random_aligned_block();
+        }
+
+        for _ in 0..MAX_FILTER_ATTEMPTS {
+            let (start_addr, end_addr, assembly_block) = self.extract_random_aligned_block()?;
+            let filter_match = self.check_block_filter(&assembly_block, start_addr, filter)?;
+
+            if filter_match.matches {
+                return Ok((start_addr, end_addr, assembly_block));
+            }
+        }
+
+        Err(anyhow::anyhow!(
+            "Could not find a block matching filter criteria after {} attempts. \
+             Try relaxing the filter constraints.",
+            MAX_FILTER_ATTEMPTS
+        ))
+    }
+
+    /// Check if a block matches the given filter criteria.
+    pub fn check_block_filter(
+        &self,
+        assembly_block: &[u8],
+        start_addr: u64,
+        filter: &ExtractionFilter,
+    ) -> Result<FilterMatch> {
+        let cs = self.create_capstone_with_detail()?;
+        let insns = cs.disasm_all(assembly_block, start_addr).map_err(|e| {
+            SnippexError::BinaryParsing(format!("Failed to disassemble block: {e}"))
+        })?;
+
+        let block_size = assembly_block.len();
+        let instruction_count = insns.len();
+        let mut has_memory_access = false;
+        let mut categories_found = HashSet::new();
+
+        for insn in insns.iter() {
+            let mnemonic = insn.mnemonic().unwrap_or("");
+            let op_str = insn.op_str().unwrap_or("");
+
+            // Detect memory access from operand string
+            if op_str.contains('[') {
+                has_memory_access = true;
+            }
+
+            // Categorize instruction by mnemonic
+            let category = Self::categorize_instruction(mnemonic);
+            categories_found.insert(category);
+        }
+
+        // Check size constraints
+        let size_match = match (filter.min_size, filter.max_size) {
+            (Some(min), Some(max)) => block_size >= min && block_size <= max,
+            (Some(min), None) => block_size >= min,
+            (None, Some(max)) => block_size <= max,
+            (None, None) => true,
+        };
+
+        // Check memory access constraint
+        let memory_match = match filter.require_memory_access {
+            Some(true) => has_memory_access,
+            Some(false) => !has_memory_access,
+            None => true,
+        };
+
+        // Check instruction category constraint
+        let category_match = match &filter.instruction_categories {
+            Some(required) => !categories_found.is_disjoint(required),
+            None => true,
+        };
+
+        let matches = size_match && memory_match && category_match;
+
+        Ok(FilterMatch {
+            matches,
+            block_size,
+            has_memory_access,
+            categories_found,
+            instruction_count,
+        })
+    }
+
+    /// Create a Capstone instance with detail mode enabled for instruction analysis.
+    fn create_capstone_with_detail(&self) -> Result<capstone::Capstone> {
+        let binary_info = self.get_binary_info()?;
+
+        let cs = match binary_info.architecture.as_str() {
+            "i386" => capstone::Capstone::new()
+                .x86()
+                .mode(arch::x86::ArchMode::Mode32)
+                .detail(true)
+                .build()
+                .map_err(|e| {
+                    SnippexError::BinaryParsing(format!("Failed to create x86 capstone: {e}"))
+                })?,
+            "x86_64" => capstone::Capstone::new()
+                .x86()
+                .mode(arch::x86::ArchMode::Mode64)
+                .detail(true)
+                .build()
+                .map_err(|e| {
+                    SnippexError::BinaryParsing(format!("Failed to create x86_64 capstone: {e}"))
+                })?,
+            _ => {
+                return Err(SnippexError::InvalidBinary(format!(
+                    "Unsupported architecture for disassembly: {}",
+                    binary_info.architecture
+                ))
+                .into())
+            }
+        };
+
+        Ok(cs)
+    }
+
+    /// Categorize an instruction by its mnemonic.
+    fn categorize_instruction(mnemonic: &str) -> InstructionCategory {
+        let mnemonic_upper = mnemonic.to_uppercase();
+
+        // Syscall instructions
+        if mnemonic_upper == "SYSCALL" || mnemonic_upper == "SYSENTER" || mnemonic_upper == "INT" {
+            return InstructionCategory::Syscall;
+        }
+
+        // Branch/jump instructions
+        if mnemonic_upper.starts_with('J')
+            || mnemonic_upper == "CALL"
+            || mnemonic_upper == "RET"
+            || mnemonic_upper == "LOOP"
+            || mnemonic_upper == "LOOPE"
+            || mnemonic_upper == "LOOPNE"
+        {
+            return InstructionCategory::Branch;
+        }
+
+        // FPU instructions
+        if mnemonic_upper.starts_with('F')
+            && (mnemonic_upper.starts_with("FLD")
+                || mnemonic_upper.starts_with("FST")
+                || mnemonic_upper.starts_with("FADD")
+                || mnemonic_upper.starts_with("FSUB")
+                || mnemonic_upper.starts_with("FMUL")
+                || mnemonic_upper.starts_with("FDIV")
+                || mnemonic_upper.starts_with("FCOM")
+                || mnemonic_upper.starts_with("FINIT")
+                || mnemonic_upper.starts_with("FCHS")
+                || mnemonic_upper.starts_with("FABS")
+                || mnemonic_upper.starts_with("FSQRT")
+                || mnemonic_upper.starts_with("FSIN")
+                || mnemonic_upper.starts_with("FCOS")
+                || mnemonic_upper.starts_with("FPTAN")
+                || mnemonic_upper.starts_with("FYL2X"))
+        {
+            return InstructionCategory::Fpu;
+        }
+
+        // AVX-512 instructions
+        if mnemonic_upper.starts_with("VP")
+            && (mnemonic_upper.contains("512")
+                || mnemonic_upper.starts_with("VPMOVQ")
+                || mnemonic_upper.starts_with("VPMOVM"))
+        {
+            return InstructionCategory::Avx512;
+        }
+
+        // AVX instructions
+        if mnemonic_upper.starts_with('V')
+            && !mnemonic_upper.starts_with("VERR")
+            && !mnemonic_upper.starts_with("VERW")
+        {
+            // Check if it's AVX-512 based on mask register usage
+            if mnemonic_upper.contains("MASK") {
+                return InstructionCategory::Avx512;
+            }
+            return InstructionCategory::Avx;
+        }
+
+        // SSE instructions
+        if mnemonic_upper.starts_with("MOVAP")
+            || mnemonic_upper.starts_with("MOVUP")
+            || mnemonic_upper.starts_with("MOVSS")
+            || mnemonic_upper.starts_with("MOVSD")
+            || mnemonic_upper.starts_with("MOVHP")
+            || mnemonic_upper.starts_with("MOVLP")
+            || mnemonic_upper.starts_with("ADDSS")
+            || mnemonic_upper.starts_with("ADDSD")
+            || mnemonic_upper.starts_with("ADDPS")
+            || mnemonic_upper.starts_with("ADDPD")
+            || mnemonic_upper.starts_with("SUBSS")
+            || mnemonic_upper.starts_with("SUBSD")
+            || mnemonic_upper.starts_with("SUBPS")
+            || mnemonic_upper.starts_with("SUBPD")
+            || mnemonic_upper.starts_with("MULSS")
+            || mnemonic_upper.starts_with("MULSD")
+            || mnemonic_upper.starts_with("MULPS")
+            || mnemonic_upper.starts_with("MULPD")
+            || mnemonic_upper.starts_with("DIVSS")
+            || mnemonic_upper.starts_with("DIVSD")
+            || mnemonic_upper.starts_with("DIVPS")
+            || mnemonic_upper.starts_with("DIVPD")
+            || mnemonic_upper.starts_with("SQRTSS")
+            || mnemonic_upper.starts_with("SQRTSD")
+            || mnemonic_upper.starts_with("SQRTPS")
+            || mnemonic_upper.starts_with("SQRTPD")
+            || mnemonic_upper.starts_with("MAXSS")
+            || mnemonic_upper.starts_with("MAXSD")
+            || mnemonic_upper.starts_with("MINSS")
+            || mnemonic_upper.starts_with("MINSD")
+            || mnemonic_upper.starts_with("CMPSS")
+            || mnemonic_upper.starts_with("CMPSD")
+            || mnemonic_upper.starts_with("CMPPS")
+            || mnemonic_upper.starts_with("CMPPD")
+            || mnemonic_upper.starts_with("CVTSS")
+            || mnemonic_upper.starts_with("CVTSD")
+            || mnemonic_upper.starts_with("CVTPS")
+            || mnemonic_upper.starts_with("CVTPD")
+            || mnemonic_upper.starts_with("CVTSI")
+            || mnemonic_upper.starts_with("CVTTSS")
+            || mnemonic_upper.starts_with("CVTTSD")
+            || mnemonic_upper.starts_with("PMOVMSK")
+            || mnemonic_upper.starts_with("MOVMSK")
+            || mnemonic_upper.starts_with("MOVDQ")
+            || mnemonic_upper.starts_with("PUNPCK")
+            || mnemonic_upper.starts_with("PACK")
+            || mnemonic_upper.starts_with("PADD")
+            || mnemonic_upper.starts_with("PSUB")
+            || mnemonic_upper.starts_with("PMUL")
+            || mnemonic_upper.starts_with("PSLL")
+            || mnemonic_upper.starts_with("PSRL")
+            || mnemonic_upper.starts_with("PSRA")
+            || mnemonic_upper.starts_with("PAND")
+            || mnemonic_upper.starts_with("POR")
+            || mnemonic_upper.starts_with("PXOR")
+            || mnemonic_upper.starts_with("PCMP")
+            || mnemonic_upper.starts_with("PMIN")
+            || mnemonic_upper.starts_with("PMAX")
+            || mnemonic_upper.starts_with("SHUFPS")
+            || mnemonic_upper.starts_with("SHUFPD")
+            || mnemonic_upper.starts_with("UNPCKHPS")
+            || mnemonic_upper.starts_with("UNPCKHPD")
+            || mnemonic_upper.starts_with("UNPCKLPS")
+            || mnemonic_upper.starts_with("UNPCKLPD")
+            || mnemonic_upper.starts_with("XORPS")
+            || mnemonic_upper.starts_with("XORPD")
+            || mnemonic_upper.starts_with("ORPS")
+            || mnemonic_upper.starts_with("ORPD")
+            || mnemonic_upper.starts_with("ANDPS")
+            || mnemonic_upper.starts_with("ANDPD")
+            || mnemonic_upper.starts_with("ANDNPS")
+            || mnemonic_upper.starts_with("ANDNPD")
+            || mnemonic_upper.starts_with("COMISS")
+            || mnemonic_upper.starts_with("COMISD")
+            || mnemonic_upper.starts_with("UCOMISS")
+            || mnemonic_upper.starts_with("UCOMISD")
+        {
+            return InstructionCategory::Sse;
+        }
+
+        InstructionCategory::General
+    }
+
+    /// Count how many blocks would match the filter in the binary.
+    /// This is useful for --dry-run to preview filter effectiveness.
+    pub fn count_matching_blocks(
+        &self,
+        filter: &ExtractionFilter,
+        sample_size: usize,
+    ) -> Result<(usize, usize)> {
+        filter.validate()?;
+
+        let mut matching = 0;
+        let mut total = 0;
+
+        for _ in 0..sample_size {
+            if let Ok((start_addr, _, assembly_block)) = self.extract_random_aligned_block() {
+                total += 1;
+                if let Ok(filter_match) =
+                    self.check_block_filter(&assembly_block, start_addr, filter)
+                {
+                    if filter_match.matches {
+                        matching += 1;
+                    }
+                }
+            }
+        }
+
+        Ok((matching, total))
     }
 }
