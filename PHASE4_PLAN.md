@@ -332,30 +332,30 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
 
 **Implementation Tasks**:
 
-- [ ] **4.3.1.1** Add size filters to extract command
+- [x] **4.3.1.1** Add size filters to extract command
   - `--min-size N`: Minimum block size in bytes
   - `--max-size N`: Maximum block size in bytes
   - File: `src/cli/extract.rs`
 
-- [ ] **4.3.1.2** Add memory access filter
+- [x] **4.3.1.2** Add memory access filter
   - `--has-memory-access`: Only blocks with memory operations
   - `--no-memory-access`: Only blocks without memory operations
   - Requires pre-analysis or pattern matching during extraction
 
-- [ ] **4.3.1.3** Add instruction type filters
+- [x] **4.3.1.3** Add instruction type filters
   - `--instruction-types SSE,FPU,AVX`: Filter by instruction categories
   - Categories: `general`, `fpu`, `sse`, `avx`, `avx512`, `branch`, `syscall`
   - Implement category detection using Capstone instruction groups
 
-- [ ] **4.3.1.4** Add address range filter
+- [x] **4.3.1.4** Add address range filter
   - `--address-range 0x1000-0x2000`: Extract only from specific range
   - Useful for targeting specific functions/sections
 
-- [ ] **4.3.1.5** Implement filter validation
+- [x] **4.3.1.5** Implement filter validation
   - Ensure filters are compatible (not mutually exclusive)
   - Warn if filter criteria too restrictive (no matching blocks)
 
-- [ ] **4.3.1.6** Add filter preview
+- [x] **4.3.1.6** Add filter preview
   - `--dry-run`: Show how many blocks would match without extracting
   - Helps tune filters before committing to extraction
 
