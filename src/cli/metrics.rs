@@ -58,6 +58,16 @@ pub struct MetricsShowCommand {
 
     #[arg(long, help = "Show detailed information including per-snapshot data")]
     pub detailed: bool,
+
+    #[arg(long, help = "Show trend analysis with improvement/regression detection")]
+    pub trends: bool,
+
+    #[arg(
+        long,
+        default_value = "5.0",
+        help = "Threshold (percentage points) for alerting on pass rate changes"
+    )]
+    pub alert_threshold: f64,
 }
 
 #[derive(Args)]
@@ -213,6 +223,11 @@ impl MetricsShowCommand {
             println!();
         }
 
+        // Show trend analysis if requested or by default when we have enough data
+        if self.trends || snapshots.len() >= 2 {
+            self.show_trend_analysis(&snapshots);
+        }
+
         if self.detailed {
             println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
             println!("Detailed Snapshot History");
@@ -241,6 +256,105 @@ impl MetricsShowCommand {
         println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
         Ok(())
+    }
+
+    fn show_trend_analysis(&self, snapshots: &[crate::db::MetricsSnapshot]) {
+        if snapshots.len() < 2 {
+            return;
+        }
+
+        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!("Trend Analysis");
+        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!();
+
+        let latest = &snapshots[0];
+        let oldest = &snapshots[snapshots.len() - 1];
+
+        // Calculate overall change
+        let pass_rate_change = latest.pass_rate() - oldest.pass_rate();
+        let total_blocks_change = latest.total_blocks as i64 - oldest.total_blocks as i64;
+
+        // Determine trend direction
+        let trend_icon = if pass_rate_change > self.alert_threshold {
+            "📈 IMPROVING"
+        } else if pass_rate_change < -self.alert_threshold {
+            "📉 REGRESSING"
+        } else {
+            "➡️  STABLE"
+        };
+
+        println!("Overall Trend: {}", trend_icon);
+        println!();
+        println!("  Pass Rate Change:   {:+.1} percentage points", pass_rate_change);
+        println!("    from {:.1}% to {:.1}%", oldest.pass_rate(), latest.pass_rate());
+        println!();
+        println!("  Block Count Change: {:+}", total_blocks_change);
+        println!("    from {} to {}", oldest.total_blocks, latest.total_blocks);
+        println!();
+
+        // Calculate average improvement per snapshot
+        if snapshots.len() > 2 {
+            let avg_change: f64 = snapshots.windows(2)
+                .map(|w| w[0].pass_rate() - w[1].pass_rate())
+                .sum::<f64>() / (snapshots.len() - 1) as f64;
+            println!("  Average Change:     {:+.2}% per snapshot", avg_change);
+            println!();
+        }
+
+        // Detect significant regressions
+        let mut regressions = Vec::new();
+        for window in snapshots.windows(2) {
+            let current = &window[0];
+            let previous = &window[1];
+            let change = current.pass_rate() - previous.pass_rate();
+            if change < -self.alert_threshold {
+                regressions.push((current.recorded_at.clone(), change));
+            }
+        }
+
+        if !regressions.is_empty() {
+            println!("⚠️  Significant Regressions Detected:");
+            for (date, change) in regressions.iter().take(5) {
+                println!("    {} ({:.1}% drop)", date.split(' ').next().unwrap_or(date), change.abs());
+            }
+            if regressions.len() > 5 {
+                println!("    ... and {} more", regressions.len() - 5);
+            }
+            println!();
+        }
+
+        // Detect significant improvements
+        let mut improvements = Vec::new();
+        for window in snapshots.windows(2) {
+            let current = &window[0];
+            let previous = &window[1];
+            let change = current.pass_rate() - previous.pass_rate();
+            if change > self.alert_threshold {
+                improvements.push((current.recorded_at.clone(), change));
+            }
+        }
+
+        if !improvements.is_empty() {
+            println!("✅ Significant Improvements:");
+            for (date, change) in improvements.iter().take(5) {
+                println!("    {} (+{:.1}% gain)", date.split(' ').next().unwrap_or(date), change);
+            }
+            if improvements.len() > 5 {
+                println!("    ... and {} more", improvements.len() - 5);
+            }
+            println!();
+        }
+
+        // Alert for recent regression
+        if snapshots.len() >= 2 {
+            let recent_change = latest.pass_rate() - snapshots[1].pass_rate();
+            if recent_change < -self.alert_threshold {
+                println!("🚨 ALERT: Pass rate dropped by {:.1}% in the most recent snapshot!", recent_change.abs());
+                println!("   Previous: {:.1}% | Current: {:.1}%", snapshots[1].pass_rate(), latest.pass_rate());
+                println!();
+            }
+        }
     }
 }
 
