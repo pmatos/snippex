@@ -99,7 +99,7 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
 
 **Implementation Tasks**:
 
-- [ ] **4.1.3.1** Add binary hash tracking
+- [x] **4.1.3.1** Add binary hash tracking
   - Store SHA256 hash of transferred binaries in local cache
   - Store hash + remote path mapping: `~/.cache/snippex/transfers.json`
 

@@ -13,6 +13,7 @@ pub mod package;
 pub mod pool;
 pub mod retry;
 pub mod transfer;
+pub mod transfer_cache;
 
 #[allow(unused_imports)]
 pub use cleanup::CleanupRegistry;
@@ -32,3 +33,5 @@ pub use pool::{PoolConfig, PoolStats, PooledSessionGuard, SSHConnectionPool};
 pub use retry::{diagnose_ssh_error, retry_with_backoff, RetryConfig};
 #[allow(unused_imports)]
 pub use transfer::{SCPTransfer, TransferResult};
+#[allow(unused_imports)]
+pub use transfer_cache::{TransferCache, TransferCacheEntry, TransferCacheStats};
