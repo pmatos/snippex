@@ -3,6 +3,7 @@ pub mod arch;
 pub mod config;
 pub mod db;
 pub mod error;
+pub mod export;
 pub mod extractor;
 pub mod formatting;
 pub mod remote;

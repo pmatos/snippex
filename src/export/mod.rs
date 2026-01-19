@@ -1,4 +1,5 @@
 pub mod csv;
+pub mod github;
 pub mod html;
 
 use serde::{Deserialize, Serialize};

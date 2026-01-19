@@ -474,7 +474,7 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
 
 **Implementation Tasks**:
 
-- [ ] **4.4.3.1** Design issue template
+- [x] **4.4.3.1** Design issue template
   - Title: "[snippex] Block validation failure: <description>"
   - Body: Block info, native vs FEX-Emu results, reproduction steps
   - Include extracted assembly and initial state
