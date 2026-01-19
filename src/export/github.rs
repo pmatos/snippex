@@ -65,6 +65,225 @@ pub struct IssueTemplate {
     pub labels: Vec<String>,
 }
 
+/// Result of creating a GitHub issue.
+#[derive(Debug, Clone)]
+pub struct CreatedIssue {
+    /// The issue number
+    pub number: u64,
+    /// The issue URL
+    pub url: String,
+    /// The issue title
+    pub title: String,
+}
+
+/// GitHub API client for issue management.
+pub struct GitHubClient {
+    config: GitHubConfig,
+}
+
+impl GitHubClient {
+    /// Creates a new GitHub client with the given configuration.
+    pub fn new(config: GitHubConfig) -> Self {
+        Self { config }
+    }
+
+    /// Creates a new GitHub client with default configuration.
+    pub fn with_defaults() -> Self {
+        Self::new(GitHubConfig::default())
+    }
+
+    /// Gets the personal access token from the environment.
+    fn get_token(&self) -> Result<String, String> {
+        std::env::var(&self.config.token_env_var).map_err(|_| {
+            format!(
+                "GitHub token not found. Set the {} environment variable with a personal access token.",
+                self.config.token_env_var
+            )
+        })
+    }
+
+    /// Creates a new issue on GitHub.
+    ///
+    /// # Arguments
+    ///
+    /// * `template` - The issue template containing title, body, and labels
+    ///
+    /// # Returns
+    ///
+    /// The created issue information including number and URL.
+    pub async fn create_issue(&self, template: &IssueTemplate) -> Result<CreatedIssue, String> {
+        let token = self.get_token()?;
+
+        // Parse repository owner and name
+        let parts: Vec<&str> = self.config.repository.split('/').collect();
+        if parts.len() != 2 {
+            return Err(format!(
+                "Invalid repository format '{}'. Expected 'owner/repo'.",
+                self.config.repository
+            ));
+        }
+        let owner = parts[0];
+        let repo = parts[1];
+
+        // Create the octocrab client
+        let octocrab = octocrab::OctocrabBuilder::new()
+            .personal_token(token)
+            .build()
+            .map_err(|e| format!("Failed to create GitHub client: {}", e))?;
+
+        // Create the issue
+        let issue = octocrab
+            .issues(owner, repo)
+            .create(&template.title)
+            .body(&template.body)
+            .labels(Some(template.labels.clone()))
+            .send()
+            .await
+            .map_err(|e| format!("Failed to create GitHub issue: {}", e))?;
+
+        Ok(CreatedIssue {
+            number: issue.number,
+            url: issue.html_url.to_string(),
+            title: issue.title,
+        })
+    }
+
+    /// Searches for existing issues with a matching signature.
+    ///
+    /// # Arguments
+    ///
+    /// * `signature` - The unique issue signature to search for
+    ///
+    /// # Returns
+    ///
+    /// A list of matching issue numbers and URLs.
+    pub async fn find_issues_by_signature(&self, signature: &str) -> Result<Vec<(u64, String)>, String> {
+        let token = self.get_token()?;
+
+        // Parse repository
+        let parts: Vec<&str> = self.config.repository.split('/').collect();
+        if parts.len() != 2 {
+            return Err(format!(
+                "Invalid repository format '{}'. Expected 'owner/repo'.",
+                self.config.repository
+            ));
+        }
+
+        // Create the octocrab client
+        let octocrab = octocrab::OctocrabBuilder::new()
+            .personal_token(token)
+            .build()
+            .map_err(|e| format!("Failed to create GitHub client: {}", e))?;
+
+        // Search for issues containing the signature
+        let query = format!("repo:{} \"Issue signature: `{}`\" in:body", self.config.repository, signature);
+
+        let results = octocrab
+            .search()
+            .issues_and_pull_requests(&query)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to search for issues: {}", e))?;
+
+        let matching: Vec<(u64, String)> = results
+            .items
+            .iter()
+            .map(|issue| (issue.number, issue.html_url.to_string()))
+            .collect();
+
+        Ok(matching)
+    }
+
+    /// Adds a comment to an existing issue.
+    ///
+    /// # Arguments
+    ///
+    /// * `issue_number` - The issue number to comment on
+    /// * `comment` - The comment body
+    pub async fn add_comment(&self, issue_number: u64, comment: &str) -> Result<(), String> {
+        let token = self.get_token()?;
+
+        // Parse repository
+        let parts: Vec<&str> = self.config.repository.split('/').collect();
+        if parts.len() != 2 {
+            return Err(format!(
+                "Invalid repository format '{}'. Expected 'owner/repo'.",
+                self.config.repository
+            ));
+        }
+        let owner = parts[0];
+        let repo = parts[1];
+
+        // Create the octocrab client
+        let octocrab = octocrab::OctocrabBuilder::new()
+            .personal_token(token)
+            .build()
+            .map_err(|e| format!("Failed to create GitHub client: {}", e))?;
+
+        // Add the comment
+        octocrab
+            .issues(owner, repo)
+            .create_comment(issue_number, comment)
+            .await
+            .map_err(|e| format!("Failed to add comment to issue: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Creates an issue or adds to existing one if duplicate found.
+    ///
+    /// This method first checks for existing issues with the same signature.
+    /// If found, it adds a comment to the existing issue instead of creating
+    /// a duplicate.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - The issue data from validation failure
+    ///
+    /// # Returns
+    ///
+    /// The issue information (new or existing) and whether it was newly created.
+    pub async fn create_or_update(&self, data: &IssueData) -> Result<(CreatedIssue, bool), String> {
+        let differences = collect_all_differences(data);
+        let signature = generate_issue_signature(&data.extraction, &differences);
+
+        // Check for existing issues
+        let existing = self.find_issues_by_signature(&signature).await?;
+
+        if let Some((number, url)) = existing.first() {
+            // Add comment to existing issue
+            let comment = format!(
+                "## Additional Reproduction\n\n\
+                 This validation failure was detected again.\n\n\
+                 **Environment:**\n\
+                 - Architecture: {}\n\
+                 - OS: {}\n\
+                 - Kernel: {}\n\n\
+                 *Detected by snippex*",
+                data.host_info.architecture,
+                data.host_info.os,
+                data.host_info.kernel
+            );
+
+            self.add_comment(*number, &comment).await?;
+
+            Ok((
+                CreatedIssue {
+                    number: *number,
+                    url: url.clone(),
+                    title: format!("Existing issue #{}", number),
+                },
+                false, // Not newly created
+            ))
+        } else {
+            // Create new issue
+            let template = create_issue_template(data);
+            let created = self.create_issue(&template).await?;
+            Ok((created, true)) // Newly created
+        }
+    }
+}
+
 /// Generates a unique signature for an issue to detect duplicates.
 pub fn generate_issue_signature(extraction: &ExtractionInfo, differences: &[String]) -> String {
     use sha2::{Digest, Sha256};

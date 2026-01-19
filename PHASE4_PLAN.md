@@ -479,7 +479,7 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
   - Body: Block info, native vs FEX-Emu results, reproduction steps
   - Include extracted assembly and initial state
 
-- [ ] **4.4.3.2** Implement GitHub issue creation
+- [x] **4.4.3.2** Implement GitHub issue creation
   - File: `src/export/github.rs` (new)
   - Use `octocrab` crate for GitHub API
   - Support personal access token authentication
