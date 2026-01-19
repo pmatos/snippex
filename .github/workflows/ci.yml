@@ -46,27 +46,44 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-  # Unit and integration tests
+  # Unit and integration tests - matrix across OS and Rust versions
   test:
-    name: Test
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }} / ${{ matrix.rust }})
+    runs-on: ${{ matrix.os }}
     needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        rust: [stable, "1.75"]  # stable + MSRV
+        exclude:
+          # Only test MSRV on Ubuntu to save CI time
+          - os: macos-latest
+            rust: "1.75"
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
 
-      - name: Install system dependencies
+      - name: Install system dependencies (Ubuntu)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libcapstone-dev nasm
 
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install capstone nasm
+
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "test"
+          shared-key: "test-${{ matrix.os }}-${{ matrix.rust }}"
           cache-all-crates: true
           prefix-key: "v2"
           save-if: ${{ github.ref == 'refs/heads/main' }}
