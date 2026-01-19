@@ -489,12 +489,12 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
   - `snippex report github --batch 1-100 --failing`: Create issues for all failures
   - Deduplicate: don't create issue if similar one exists
 
-- [ ] **4.4.3.4** Implement duplicate detection
+- [x] **4.4.3.4** Implement duplicate detection
   - Search existing issues by block hash or signature
   - Link to existing issue instead of creating duplicate
   - Add comment with new reproduction info
 
-- [ ] **4.4.3.5** Add configuration for issue creation
+- [x] **4.4.3.5** Add configuration for issue creation
   - Target repo: `FEX-Emu/FEX` (configurable)
   - Labels: `bug`, `snippex`, `needs-triage`
   - Assignees (optional)
