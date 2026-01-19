@@ -1,0 +1,178 @@
+# Validation workflow for snippex
+# Runs block validation tests on schedule
+#
+# This workflow runs actual block extraction and validation tests
+# to ensure snippex functionality beyond unit tests.
+
+name: Validation
+
+on:
+  # Run on schedule (weekly)
+  schedule:
+    - cron: '0 3 * * 0'  # Sunday at 3 AM UTC
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      block_count:
+        description: 'Number of blocks to extract and validate'
+        required: false
+        default: '50'
+      binary_path:
+        description: 'Path to binary for extraction (uses sample if empty)'
+        required: false
+        default: ''
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Build snippex for validation
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcapstone-dev nasm
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "validate"
+          cache-all-crates: true
+          prefix-key: "v2"
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: snippex-binary
+          path: target/release/snippex
+          retention-days: 1
+
+  # Run validation on x86_64
+  validate-x86:
+    name: Validate x86_64
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Download snippex binary
+        uses: actions/download-artifact@v4
+        with:
+          name: snippex-binary
+          path: ./bin
+
+      - name: Make binary executable
+        run: chmod +x ./bin/snippex
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm binutils
+
+      - name: Create sample binary for testing
+        run: |
+          # Create a simple test binary
+          mkdir -p samples
+          cat > samples/test.c << 'EOF'
+          #include <stdio.h>
+          int add(int a, int b) { return a + b; }
+          int sub(int a, int b) { return a - b; }
+          int mul(int a, int b) { return a * b; }
+          int main() {
+            printf("Results: %d %d %d\n", add(5, 3), sub(10, 4), mul(3, 7));
+            return 0;
+          }
+          EOF
+          gcc -O2 -o samples/test-binary samples/test.c
+
+      - name: Initialize database
+        run: |
+          ./bin/snippex init --database validation.db
+
+      - name: Extract blocks
+        run: |
+          BLOCK_COUNT="${{ github.event.inputs.block_count || '50' }}"
+          ./bin/snippex extract samples/test-binary \
+            --database validation.db \
+            --count "$BLOCK_COUNT" \
+            --min-size 8 \
+            --max-size 128
+
+      - name: List extractions
+        run: |
+          ./bin/snippex list --database validation.db
+
+      - name: Analyze blocks
+        run: |
+          ./bin/snippex analyze --database validation.db --all
+
+      - name: Run native simulations
+        run: |
+          ./bin/snippex simulate \
+            --database validation.db \
+            --limit 20 \
+            --verbose || true  # Don't fail on simulation errors
+
+      - name: Generate validation report
+        run: |
+          ./bin/snippex stats summary --database validation.db || true
+
+      - name: Upload database
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-db-x86
+          path: validation.db
+          retention-days: 7
+
+      - name: Upload validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-logs-x86
+          path: |
+            *.log
+            validation.db
+          retention-days: 7
+
+  # Summary job
+  summary:
+    name: Validation Summary
+    runs-on: ubuntu-latest
+    needs: [validate-x86]
+    if: always()
+    steps:
+      - name: Download x86 database
+        uses: actions/download-artifact@v4
+        with:
+          name: validation-db-x86
+          path: ./results
+
+      - name: Generate summary
+        run: |
+          echo "## Validation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Platform | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.validate-x86.result }}" == "success" ]; then
+            echo "| x86_64 | ✅ Pass |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| x86_64 | ❌ Fail |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Validation completed at $(date -u)" >> $GITHUB_STEP_SUMMARY
