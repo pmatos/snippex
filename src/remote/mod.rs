@@ -6,6 +6,7 @@
 //! happens on another.
 
 pub mod cleanup;
+pub mod delta_transfer;
 pub mod diagnostics;
 pub mod executor;
 pub mod hash_verifier;
@@ -18,6 +19,10 @@ pub mod transfer_cache;
 
 #[allow(unused_imports)]
 pub use cleanup::CleanupRegistry;
+#[allow(unused_imports)]
+pub use delta_transfer::{
+    DeltaTransfer, DeltaTransferResult, TransferCapabilities, TransferMethod,
+};
 #[allow(unused_imports)]
 pub use diagnostics::{
     diagnose_remote_execution_failure, verify_simulation_dependencies, verify_snippex_installation,
