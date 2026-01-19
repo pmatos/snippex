@@ -22,6 +22,8 @@ pub enum MetricsSubcommand {
     Show(MetricsShowCommand),
     /// Export metrics to JSON or CSV
     Export(MetricsExportCommand),
+    /// Export metrics in Prometheus format for monitoring integration
+    Prometheus(MetricsPrometheusCommand),
     /// Clear all metrics history
     Clear(MetricsClearCommand),
 }
@@ -101,12 +103,44 @@ pub struct MetricsClearCommand {
     pub force: bool,
 }
 
+#[derive(Args)]
+pub struct MetricsPrometheusCommand {
+    #[arg(
+        short,
+        long,
+        default_value = "snippex.db",
+        help = "SQLite database path"
+    )]
+    pub database: PathBuf,
+
+    #[arg(
+        short,
+        long,
+        help = "Output file path (default: stdout)"
+    )]
+    pub output: Option<PathBuf>,
+
+    #[arg(
+        long,
+        default_value = "snippex",
+        help = "Metric name prefix"
+    )]
+    pub prefix: String,
+
+    #[arg(
+        long,
+        help = "Include help text for each metric"
+    )]
+    pub with_help: bool,
+}
+
 impl MetricsCommand {
     pub fn execute(self) -> Result<()> {
         match self.command {
             MetricsSubcommand::Record(cmd) => cmd.execute(),
             MetricsSubcommand::Show(cmd) => cmd.execute(),
             MetricsSubcommand::Export(cmd) => cmd.execute(),
+            MetricsSubcommand::Prometheus(cmd) => cmd.execute(),
             MetricsSubcommand::Clear(cmd) => cmd.execute(),
         }
     }
@@ -510,6 +544,143 @@ impl MetricsClearCommand {
         println!("Cleared {} metrics snapshot(s).", cleared);
 
         Ok(())
+    }
+}
+
+impl MetricsPrometheusCommand {
+    pub fn execute(self) -> Result<()> {
+        if !self.database.exists() {
+            return Err(anyhow!(
+                "Database not found at '{}'.\n\n\
+                 Suggestions:\n\
+                 • Extract blocks first: snippex extract <binary>\n\
+                 • Specify a different database: snippex metrics prometheus -d <path>",
+                self.database.display()
+            ));
+        }
+
+        let db = Database::new(&self.database)?;
+        let latest = db.get_latest_metrics_snapshot()?;
+
+        let output = self.generate_prometheus_output(latest.as_ref());
+
+        if let Some(output_path) = &self.output {
+            let mut file = File::create(output_path)?;
+            file.write_all(output.as_bytes())?;
+            eprintln!("Prometheus metrics written to {}", output_path.display());
+        } else {
+            print!("{}", output);
+        }
+
+        Ok(())
+    }
+
+    fn generate_prometheus_output(&self, snapshot: Option<&crate::db::MetricsSnapshot>) -> String {
+        let mut output = String::new();
+        let prefix = &self.prefix;
+
+        // Add help text if requested
+        if self.with_help {
+            output.push_str(&format!("# HELP {}_total_blocks Total number of extracted assembly blocks\n", prefix));
+            output.push_str(&format!("# TYPE {}_total_blocks gauge\n", prefix));
+        }
+        if let Some(s) = snapshot {
+            output.push_str(&format!("{}_total_blocks {}\n", prefix, s.total_blocks));
+        } else {
+            output.push_str(&format!("{}_total_blocks 0\n", prefix));
+        }
+
+        if self.with_help {
+            output.push_str(&format!("# HELP {}_analyzed_blocks Number of blocks that have been analyzed\n", prefix));
+            output.push_str(&format!("# TYPE {}_analyzed_blocks gauge\n", prefix));
+        }
+        if let Some(s) = snapshot {
+            output.push_str(&format!("{}_analyzed_blocks {}\n", prefix, s.analyzed_blocks));
+        } else {
+            output.push_str(&format!("{}_analyzed_blocks 0\n", prefix));
+        }
+
+        if self.with_help {
+            output.push_str(&format!("# HELP {}_validated_blocks Number of blocks that have been validated\n", prefix));
+            output.push_str(&format!("# TYPE {}_validated_blocks gauge\n", prefix));
+        }
+        if let Some(s) = snapshot {
+            output.push_str(&format!("{}_validated_blocks {}\n", prefix, s.validated_blocks));
+        } else {
+            output.push_str(&format!("{}_validated_blocks 0\n", prefix));
+        }
+
+        if self.with_help {
+            output.push_str(&format!("# HELP {}_validation_pass_total Total number of passed validations\n", prefix));
+            output.push_str(&format!("# TYPE {}_validation_pass_total counter\n", prefix));
+        }
+        if let Some(s) = snapshot {
+            output.push_str(&format!("{}_validation_pass_total {}\n", prefix, s.pass_count));
+        } else {
+            output.push_str(&format!("{}_validation_pass_total 0\n", prefix));
+        }
+
+        if self.with_help {
+            output.push_str(&format!("# HELP {}_validation_fail_total Total number of failed validations\n", prefix));
+            output.push_str(&format!("# TYPE {}_validation_fail_total counter\n", prefix));
+        }
+        if let Some(s) = snapshot {
+            output.push_str(&format!("{}_validation_fail_total {}\n", prefix, s.fail_count));
+        } else {
+            output.push_str(&format!("{}_validation_fail_total 0\n", prefix));
+        }
+
+        if self.with_help {
+            output.push_str(&format!("# HELP {}_validation_skip_total Total number of skipped validations\n", prefix));
+            output.push_str(&format!("# TYPE {}_validation_skip_total counter\n", prefix));
+        }
+        if let Some(s) = snapshot {
+            output.push_str(&format!("{}_validation_skip_total {}\n", prefix, s.skip_count));
+        } else {
+            output.push_str(&format!("{}_validation_skip_total 0\n", prefix));
+        }
+
+        if self.with_help {
+            output.push_str(&format!("# HELP {}_validation_pass_rate Percentage of validations that passed\n", prefix));
+            output.push_str(&format!("# TYPE {}_validation_pass_rate gauge\n", prefix));
+        }
+        if let Some(s) = snapshot {
+            output.push_str(&format!("{}_validation_pass_rate {:.2}\n", prefix, s.pass_rate()));
+        } else {
+            output.push_str(&format!("{}_validation_pass_rate 0\n", prefix));
+        }
+
+        if self.with_help {
+            output.push_str(&format!("# HELP {}_avg_validation_duration_seconds Average validation duration in seconds\n", prefix));
+            output.push_str(&format!("# TYPE {}_avg_validation_duration_seconds gauge\n", prefix));
+        }
+        if let Some(s) = snapshot {
+            if let Some(duration_ns) = s.avg_duration_ns {
+                let duration_secs = duration_ns as f64 / 1_000_000_000.0;
+                output.push_str(&format!("{}_avg_validation_duration_seconds {:.6}\n", prefix, duration_secs));
+            } else {
+                output.push_str(&format!("{}_avg_validation_duration_seconds 0\n", prefix));
+            }
+        } else {
+            output.push_str(&format!("{}_avg_validation_duration_seconds 0\n", prefix));
+        }
+
+        if self.with_help {
+            output.push_str(&format!("# HELP {}_last_snapshot_timestamp Unix timestamp of the last metrics snapshot\n", prefix));
+            output.push_str(&format!("# TYPE {}_last_snapshot_timestamp gauge\n", prefix));
+        }
+        if let Some(s) = snapshot {
+            // Parse timestamp and convert to Unix time
+            if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(&s.recorded_at, "%Y-%m-%d %H:%M:%S") {
+                output.push_str(&format!("{}_last_snapshot_timestamp {}\n", prefix, dt.and_utc().timestamp()));
+            } else {
+                output.push_str(&format!("{}_last_snapshot_timestamp 0\n", prefix));
+            }
+        } else {
+            output.push_str(&format!("{}_last_snapshot_timestamp 0\n", prefix));
+        }
+
+        output
     }
 }
 

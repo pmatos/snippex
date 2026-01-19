@@ -538,7 +538,7 @@ Phase 4 focuses on production-ready features: performance optimizations, enhance
   - Calculate improvement/regression rate
   - Alert if failure rate increases significantly
 
-- [ ] **4.4.4.5** Optional: Prometheus metrics export
+- [x] **4.4.4.5** Optional: Prometheus metrics export
   - `snippex metrics prometheus`: Export Prometheus-format metrics
   - Useful for integration with existing monitoring
 
