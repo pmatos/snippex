@@ -210,6 +210,7 @@ jobs:
           files: ./cobertura.xml
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
+          slug: pmatos/snippex
           verbose: true
 
   # Regression testing (runs on main branch only)
