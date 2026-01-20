@@ -1,6 +1,6 @@
 # Snippex
 
-[![codecov](https://app.codecov.io/gh/pmatos/snippex/graph/badge.svg)](https://app.codecov.io/gh/pmatos/snippex/)
+[![codecov](https://codecov.io/gh/pmatos/snippex/graph/badge.svg?token=7MNSNMX3DI)](https://codecov.io/gh/pmatos/snippex)
 
 A framework for extracting and analyzing assembly code blocks from ELF and PE binaries.
 
