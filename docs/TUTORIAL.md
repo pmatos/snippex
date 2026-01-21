@@ -38,6 +38,32 @@ STK_BINARY="/tmp/SuperTuxKart-1.5-linux-x86_64/bin/supertuxkart"
 
 ### 3. Configure Remote Machine
 
+#### Option A: Automated Setup (Recommended)
+
+Use the `remote-setup` command to automatically cross-compile and deploy snippex:
+
+```bash
+# First, add your remote configuration
+snippex config add-remote arm64-fex \
+  --host fex-arm64.local \
+  --user user \
+  --architecture aarch64 \
+  --fex-path ~/dev/FEX/out/install/Release/bin/FEXInterpreter
+
+# Cross-compile and deploy to the remote
+snippex remote-setup arm64-fex --verbose
+
+# Validate the setup
+snippex config validate arm64-fex --check-deps
+```
+
+The `remote-setup` command will:
+1. Cross-compile snippex for ARM64 (requires `cross` tool: `cargo install cross`)
+2. Transfer the binary to the remote machine
+3. Verify the installation works
+
+#### Option B: Manual Setup
+
 Build snippex natively on your ARM64 machine:
 
 ```bash
@@ -54,6 +80,49 @@ cp target/release/snippex ~/.local/bin/
 
 # Install cross-compilation tools
 sudo apt install gcc-x86-64-linux-gnu nasm
+```
+
+Then configure the remote locally:
+
+```bash
+snippex config add-remote arm64-fex \
+  --host fex-arm64.local \
+  --user user \
+  --architecture aarch64 \
+  --snippex-path ~/.local/bin/snippex \
+  --fex-path ~/dev/FEX/out/install/Release/bin/FEXInterpreter
+```
+
+#### Validating the Remote Configuration
+
+Use `config validate` to verify everything is set up correctly:
+
+```bash
+# Quick check (SSH only)
+snippex config validate arm64-fex --quick
+
+# Standard check (SSH + snippex + FEX path)
+snippex config validate arm64-fex
+
+# Full check including build dependencies
+snippex config validate arm64-fex --check-deps --verbose
+```
+
+Example output:
+```
+Validating 1 remote(s) (full + dependencies mode)...
+
+Remote: arm64-fex (user@fex-arm64.local)
+  SSH connection... ✓ OK
+  snippex (~/.local/bin/snippex)... ✓ snippex 0.1.0
+  FEX-Emu (~/dev/FEX/.../FEXInterpreter)... ✓ exists
+  Build dependencies:
+    nasm... ✓ NASM version 2.16.01
+    ld... ✓ GNU ld (GNU Binutils for Debian) 2.40
+    x86_64-linux-gnu-gcc... ✓ x86_64-linux-gnu-gcc (Debian 12.2
+
+═══════════════════════════════════════════════
+Results: 6 passed, 0 failed, 0 warnings
 ```
 
 ## Core Workflow
@@ -318,8 +387,25 @@ snippex import-results results.json --merge
 Configure your remote ARM64 machine:
 
 ```bash
-snippex config set remote.host "user@hostname"
-snippex config set remote.snippex_path "/home/user/.local/bin/snippex"
+# Add a remote
+snippex config add-remote arm64-fex \
+  --host hostname \
+  --user user \
+  --architecture aarch64 \
+  --snippex-path /home/user/.local/bin/snippex \
+  --fex-path ~/dev/FEX/out/install/Release/bin/FEXInterpreter
+
+# View configured remotes
+snippex config list-remotes
+
+# Show details of a specific remote
+snippex config show-remote arm64-fex
+
+# Validate remote is ready
+snippex config validate arm64-fex
+
+# Remove a remote
+snippex config remove-remote arm64-fex
 ```
 
 ### Cache Settings
@@ -383,6 +469,8 @@ snippex export -o session_results.json --simulated-only
 | `import-results` | Import simulation results |
 | `stats` | View validation statistics |
 | `regression` | Regression testing |
+| `config` | Manage remote configurations |
+| `remote-setup` | Cross-compile and deploy snippex to remote |
 
 ### Exit Codes
 
