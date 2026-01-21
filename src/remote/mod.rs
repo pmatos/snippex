@@ -14,6 +14,7 @@ pub mod orchestrator;
 pub mod package;
 pub mod pool;
 pub mod retry;
+pub mod setup;
 pub mod transfer;
 pub mod transfer_cache;
 

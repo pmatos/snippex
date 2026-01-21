@@ -26,6 +26,7 @@ use cli::import_results::ImportResultsCommand;
 use cli::list::ListCommand;
 use cli::metrics::MetricsCommand;
 use cli::regression::RegressionCommand;
+use cli::remote_setup::RemoteSetupCommand;
 use cli::remove::RemoveCommand;
 use cli::report::ReportCommand;
 use cli::simulate::SimulateCommand;
@@ -104,6 +105,8 @@ enum Commands {
     Completions(CompletionsCommand),
     /// Regression testing - track and detect behavior changes
     Regression(RegressionCommand),
+    /// Cross-compile and deploy snippex to a remote machine
+    RemoteSetup(RemoteSetupCommand),
 }
 
 fn main() -> Result<()> {
@@ -164,5 +167,6 @@ fn main() -> Result<()> {
         Commands::Metrics(cmd) => cmd.execute(),
         Commands::Completions(cmd) => cmd.execute(),
         Commands::Regression(cmd) => cmd.execute(),
+        Commands::RemoteSetup(cmd) => cmd.execute(),
     }
 }
