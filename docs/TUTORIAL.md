@@ -11,7 +11,7 @@ This tutorial demonstrates how to use Snippex to extract, analyze, simulate, and
 - Build snippex: `cargo build --release`
 
 ### Remote ARM64 Machine
-- SSH access configured (in this tutorial: `steamvr@t14s.local`)
+- SSH access configured (in this tutorial: `user@fex-arm64.local`)
 - FEX-Emu installed at a common location (e.g., `~/dev/FEX/out/install/Release/bin/FEXInterpreter`)
 - x86_64 cross-compilation tools (`apt install gcc-x86-64-linux-gnu`)
 - NASM assembler
@@ -176,7 +176,7 @@ Block #8 Validation
 
 Host: x86-64 (AMD64)
 Native execution: local
-FEX-Emu execution: steamvr@t14s.local
+FEX-Emu execution: user@fex-arm64.local
 
 Running native x86 simulation...
   Exit code: 0
@@ -197,7 +197,7 @@ Native (x86_64@local):
   rax: 0x000000001800003f
   ...
 
-FEX-Emu (aarch64@steamvr@t14s.local):
+FEX-Emu (aarch64@user@fex-arm64.local):
   Exit code: 0
   Flags: 0x0000000000000297
   rax: 0x000000001800003f
