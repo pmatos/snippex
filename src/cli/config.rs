@@ -81,14 +81,22 @@ pub enum ConfigAction {
         force: bool,
     },
 
-    /// Validate SSH connections to configured remotes
+    /// Validate remote configuration and connectivity
     Validate {
         /// Specific remote to validate (validates all if not specified)
         name: Option<String>,
 
-        /// Also check if snippex is available on remote
+        /// Quick mode: only check SSH connectivity
+        #[arg(long, short)]
+        quick: bool,
+
+        /// Check build dependencies (nasm, linker, cross-compiler)
         #[arg(long)]
-        check_snippex: bool,
+        check_deps: bool,
+
+        /// Verbose output showing command details
+        #[arg(long, short)]
+        verbose: bool,
     },
 }
 
@@ -124,8 +132,10 @@ impl ConfigCommand {
             ConfigAction::Init { force } => self.init_config(*force),
             ConfigAction::Validate {
                 name,
-                check_snippex,
-            } => self.validate_remotes(name.as_deref(), *check_snippex),
+                quick,
+                check_deps,
+                verbose,
+            } => self.validate_remotes(name.as_deref(), *quick, *check_deps, *verbose),
         }
     }
 
@@ -324,7 +334,13 @@ impl ConfigCommand {
         Ok(())
     }
 
-    fn validate_remotes(&self, name: Option<&str>, check_snippex: bool) -> Result<()> {
+    fn validate_remotes(
+        &self,
+        name: Option<&str>,
+        quick: bool,
+        check_deps: bool,
+        verbose: bool,
+    ) -> Result<()> {
         let config = Config::load()?;
 
         if config.is_local_only() {
@@ -348,54 +364,255 @@ impl ConfigCommand {
                 .collect(),
         };
 
-        println!("Validating {} remote(s)...", remotes_to_validate.len());
+        let mode = if quick {
+            "quick"
+        } else if check_deps {
+            "full + dependencies"
+        } else {
+            "standard"
+        };
+        println!(
+            "Validating {} remote(s) ({} mode)...",
+            remotes_to_validate.len(),
+            mode
+        );
         println!();
 
-        let mut success_count = 0;
-        let mut failure_count = 0;
+        let mut total_passed = 0;
+        let mut total_failed = 0;
+        let mut total_warnings = 0;
 
         for (remote_name, remote) in &remotes_to_validate {
-            print!("  {} ({}@{})... ", remote_name, remote.user, remote.host);
+            println!("Remote: {} ({}@{})", remote_name, remote.user, remote.host);
 
+            // 1. SSH Connection
+            print!("  SSH connection... ");
             match self.test_ssh_connection(remote) {
                 Ok(()) => {
-                    println!("✓ SSH OK");
-
-                    if check_snippex {
-                        print!("    Checking snippex... ");
-                        match self.test_remote_snippex(remote) {
-                            Ok(version) => {
-                                println!("✓ Found ({})", version);
-                                success_count += 1;
-                            }
-                            Err(e) => {
-                                println!("✗ {}", e);
-                                failure_count += 1;
-                            }
-                        }
-                    } else {
-                        success_count += 1;
-                    }
+                    println!("✓ OK");
+                    total_passed += 1;
                 }
                 Err(e) => {
-                    println!("✗ {}", e);
-                    failure_count += 1;
+                    println!("✗ FAILED");
+                    if verbose {
+                        println!("    Error: {}", e);
+                    }
+                    total_failed += 1;
+                    println!();
+                    continue; // Skip other checks if SSH fails
                 }
             }
+
+            if quick {
+                println!();
+                continue;
+            }
+
+            // 2. Snippex binary
+            print!("  snippex ({})... ", remote.snippex_path);
+            match self.test_remote_command(remote, &remote.snippex_path, &["--version"], verbose) {
+                Ok(output) => {
+                    let version = output.lines().next().unwrap_or("unknown").trim();
+                    println!("✓ {}", version);
+                    total_passed += 1;
+                }
+                Err(e) => {
+                    println!("✗ FAILED");
+                    if verbose {
+                        println!("    Error: {}", e);
+                    }
+                    total_failed += 1;
+                }
+            }
+
+            // 3. FEX-Emu (if configured)
+            if let Some(ref fex_path) = remote.fex_path {
+                print!("  FEX-Emu ({})... ", fex_path);
+                // FEXInterpreter doesn't support --version, check if it exists and is executable
+                match self.test_remote_file_exists(remote, fex_path, verbose) {
+                    Ok(true) => {
+                        println!("✓ exists");
+                        total_passed += 1;
+                    }
+                    Ok(false) => {
+                        println!("✗ not found");
+                        total_failed += 1;
+                    }
+                    Err(e) => {
+                        println!("✗ FAILED");
+                        if verbose {
+                            println!("    Error: {}", e);
+                        }
+                        total_failed += 1;
+                    }
+                }
+            }
+
+            // 4. Build dependencies (optional)
+            if check_deps {
+                println!("  Build dependencies:");
+
+                // nasm
+                print!("    nasm... ");
+                match self.test_remote_command(remote, "nasm", &["--version"], verbose) {
+                    Ok(output) => {
+                        let version = output.lines().next().unwrap_or("").trim();
+                        let version_short = version
+                            .split_whitespace()
+                            .take(3)
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        println!("✓ {}", version_short);
+                        total_passed += 1;
+                    }
+                    Err(_) => {
+                        println!("✗ not found");
+                        total_failed += 1;
+                    }
+                }
+
+                // ld (linker)
+                print!("    ld... ");
+                match self.test_remote_command(remote, "ld", &["--version"], verbose) {
+                    Ok(output) => {
+                        let version = output.lines().next().unwrap_or("").trim();
+                        println!("✓ {}", version.chars().take(50).collect::<String>());
+                        total_passed += 1;
+                    }
+                    Err(_) => {
+                        println!("✗ not found");
+                        total_failed += 1;
+                    }
+                }
+
+                // Cross-compiler (for ARM hosts building x86)
+                if remote.architecture.as_deref() == Some("aarch64") {
+                    print!("    x86_64-linux-gnu-gcc... ");
+                    match self.test_remote_command(
+                        remote,
+                        "x86_64-linux-gnu-gcc",
+                        &["--version"],
+                        verbose,
+                    ) {
+                        Ok(output) => {
+                            let version = output.lines().next().unwrap_or("").trim();
+                            println!("✓ {}", version.chars().take(40).collect::<String>());
+                            total_passed += 1;
+                        }
+                        Err(_) => {
+                            println!("⚠ not found (optional for x86 test binaries)");
+                            total_warnings += 1;
+                        }
+                    }
+
+                    // FEX-Emu availability (if not explicitly configured)
+                    if remote.fex_path.is_none() {
+                        print!("    FEXInterpreter (PATH)... ");
+                        match self.test_remote_command(
+                            remote,
+                            "which",
+                            &["FEXInterpreter"],
+                            verbose,
+                        ) {
+                            Ok(path) => {
+                                println!("✓ {}", path.trim());
+                                total_passed += 1;
+                            }
+                            Err(_) => {
+                                println!("⚠ not found (optional for x86 emulation)");
+                                total_warnings += 1;
+                            }
+                        }
+                    }
+                }
+            }
+
+            println!();
         }
 
-        println!();
+        // Summary
+        println!("═══════════════════════════════════════════");
         println!(
-            "Results: {} passed, {} failed",
-            success_count, failure_count
+            "Results: {} passed, {} failed, {} warnings",
+            total_passed, total_failed, total_warnings
         );
+
+        if total_failed > 0 {
+            println!();
+            println!("Some checks failed. Use --verbose for more details.");
+        }
 
         Ok(())
     }
 
-    fn test_ssh_connection(&self, remote: &RemoteConfig) -> Result<()> {
+    fn test_remote_command(
+        &self,
+        remote: &RemoteConfig,
+        command: &str,
+        args: &[&str],
+        verbose: bool,
+    ) -> Result<String> {
         let mut cmd = Command::new("ssh");
+        self.add_ssh_options(&mut cmd, remote);
 
+        // Build the remote command string
+        let remote_cmd = if args.is_empty() {
+            command.to_string()
+        } else {
+            format!("{} {}", command, args.join(" "))
+        };
+
+        if verbose {
+            eprintln!(
+                "    Running: ssh {}@{} '{}'",
+                remote.user, remote.host, remote_cmd
+            );
+        }
+
+        cmd.arg(format!("{}@{}", remote.user, remote.host))
+            .arg(&remote_cmd);
+
+        let output = cmd
+            .output()
+            .map_err(|e| anyhow::anyhow!("SSH failed: {}", e))?;
+
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(anyhow::anyhow!("{}", stderr.trim()))
+        }
+    }
+
+    fn test_remote_file_exists(
+        &self,
+        remote: &RemoteConfig,
+        path: &str,
+        verbose: bool,
+    ) -> Result<bool> {
+        let mut cmd = Command::new("ssh");
+        self.add_ssh_options(&mut cmd, remote);
+
+        let test_cmd = format!("test -x '{}' && echo exists", path);
+
+        if verbose {
+            eprintln!(
+                "    Running: ssh {}@{} '{}'",
+                remote.user, remote.host, test_cmd
+            );
+        }
+
+        cmd.arg(format!("{}@{}", remote.user, remote.host))
+            .arg(&test_cmd);
+
+        let output = cmd
+            .output()
+            .map_err(|e| anyhow::anyhow!("SSH failed: {}", e))?;
+
+        Ok(output.status.success())
+    }
+
+    fn add_ssh_options(&self, cmd: &mut Command, remote: &RemoteConfig) {
         cmd.arg("-o")
             .arg("BatchMode=yes")
             .arg("-o")
@@ -419,10 +636,14 @@ impl ConfigCommand {
         if remote.port != 22 {
             cmd.arg("-p").arg(remote.port.to_string());
         }
+    }
+
+    fn test_ssh_connection(&self, remote: &RemoteConfig) -> Result<()> {
+        let mut cmd = Command::new("ssh");
+        self.add_ssh_options(&mut cmd, remote);
 
         cmd.arg(format!("{}@{}", remote.user, remote.host))
-            .arg("echo")
-            .arg("ok");
+            .arg("echo ok");
 
         let output = cmd
             .output()
@@ -433,60 +654,6 @@ impl ConfigCommand {
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
             Err(anyhow::anyhow!("SSH failed: {}", stderr.trim()))
-        }
-    }
-
-    fn test_remote_snippex(&self, remote: &RemoteConfig) -> Result<String> {
-        let mut cmd = Command::new("ssh");
-
-        cmd.arg("-o")
-            .arg("BatchMode=yes")
-            .arg("-o")
-            .arg("ConnectTimeout=10");
-
-        if let Some(ref key) = remote.ssh_key {
-            let expanded_key = if let Some(stripped) = key.strip_prefix("~/") {
-                if let Some(home) = dirs::home_dir() {
-                    home.join(stripped).to_string_lossy().to_string()
-                } else {
-                    key.clone()
-                }
-            } else {
-                key.clone()
-            };
-            cmd.arg("-i").arg(expanded_key);
-        }
-
-        if remote.port != 22 {
-            cmd.arg("-p").arg(remote.port.to_string());
-        }
-
-        cmd.arg(format!("{}@{}", remote.user, remote.host))
-            .arg(&remote.snippex_path)
-            .arg("--version");
-
-        let output = cmd
-            .output()
-            .map_err(|e| anyhow::anyhow!("SSH failed: {}", e))?;
-
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let version = stdout.trim().to_string();
-            Ok(if version.is_empty() {
-                "version unknown".to_string()
-            } else {
-                version
-            })
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            if stderr.contains("command not found") || stderr.contains("not found") {
-                Err(anyhow::anyhow!(
-                    "snippex not found at '{}'",
-                    remote.snippex_path
-                ))
-            } else {
-                Err(anyhow::anyhow!("Failed to run snippex: {}", stderr.trim()))
-            }
         }
     }
 }
