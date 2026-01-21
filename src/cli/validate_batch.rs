@@ -592,7 +592,11 @@ impl ValidateBatchCommand {
 
         // Run FEX-Emu simulation
         if !self.native_only && !fex_target.is_unavailable() {
-            let emulator = EmulatorConfig::fex_emu();
+            // Use configured FEX path if available in remote config
+            let fex_path = fex_target
+                .remote_config()
+                .and_then(|rc| rc.fex_path.as_deref());
+            let emulator = EmulatorConfig::fex_emu_with_optional_path(fex_path);
             match self.run_simulation(
                 extraction,
                 analysis,
@@ -832,7 +836,11 @@ impl ValidateBatchCommand {
 
         // Run FEX-Emu simulation
         if !self.native_only && !fex_target.is_unavailable() {
-            let emulator = EmulatorConfig::fex_emu();
+            // Use configured FEX path if available in remote config
+            let fex_path = fex_target
+                .remote_config()
+                .and_then(|rc| rc.fex_path.as_deref());
+            let emulator = EmulatorConfig::fex_emu_with_optional_path(fex_path);
             match self.run_simulation(
                 extraction,
                 &analysis,

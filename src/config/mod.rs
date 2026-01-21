@@ -82,6 +82,10 @@ pub struct RemoteConfig {
     /// Connection timeout in seconds
     #[serde(default = "default_timeout")]
     pub timeout: u64,
+
+    /// Path to FEX-Emu binary on the remote machine (optional)
+    /// If not specified, FEXInterpreter will be searched in PATH
+    pub fex_path: Option<String>,
 }
 
 /// Default settings for the application.
@@ -283,6 +287,7 @@ impl RemoteConfig {
             ssh_key: None,
             architecture: None,
             timeout: DEFAULT_TIMEOUT,
+            fex_path: None,
         }
     }
 
@@ -313,6 +318,12 @@ impl RemoteConfig {
     /// Builder method to set the timeout.
     pub fn with_timeout(mut self, timeout: u64) -> Self {
         self.timeout = timeout;
+        self
+    }
+
+    /// Builder method to set the FEX-Emu path.
+    pub fn with_fex_path(mut self, path: String) -> Self {
+        self.fex_path = Some(path);
         self
     }
 

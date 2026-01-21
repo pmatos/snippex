@@ -56,6 +56,10 @@ pub enum ConfigAction {
         /// Connection timeout in seconds
         #[arg(long, default_value = "60")]
         timeout: u64,
+
+        /// Path to FEX-Emu binary on remote (optional)
+        #[arg(long)]
+        fex_path: Option<String>,
     },
 
     /// Remove a remote configuration
@@ -103,6 +107,7 @@ impl ConfigCommand {
                 ssh_key,
                 architecture,
                 timeout,
+                fex_path,
             } => self.add_remote(
                 name,
                 host,
@@ -112,6 +117,7 @@ impl ConfigCommand {
                 ssh_key.clone(),
                 architecture.clone(),
                 *timeout,
+                fex_path.clone(),
             ),
             ConfigAction::RemoveRemote { name } => self.remove_remote(name),
             ConfigAction::ShowRemote { name } => self.show_remote(name),
@@ -192,6 +198,7 @@ impl ConfigCommand {
         ssh_key: Option<String>,
         architecture: Option<String>,
         timeout: u64,
+        fex_path: Option<String>,
     ) -> Result<()> {
         let mut config = Config::load()?;
 
@@ -210,6 +217,10 @@ impl ConfigCommand {
 
         if let Some(arch) = architecture {
             remote = remote.with_architecture(arch);
+        }
+
+        if let Some(fex) = fex_path {
+            remote = remote.with_fex_path(fex);
         }
 
         config.set_remote(name.to_string(), remote);
@@ -253,6 +264,10 @@ impl ConfigCommand {
                     remote.architecture.as_deref().unwrap_or("(unspecified)")
                 );
                 println!("  Timeout: {}s", remote.timeout);
+                println!(
+                    "  FEX path: {}",
+                    remote.fex_path.as_deref().unwrap_or("(use PATH)")
+                );
                 println!();
                 println!("Connection string: {}", remote.connection_string());
             }
@@ -290,7 +305,8 @@ impl ConfigCommand {
             RemoteConfig::new("arm-server.example.com".to_string(), "user".to_string())
                 .with_snippex_path("/usr/local/bin/snippex".to_string())
                 .with_ssh_key("~/.ssh/id_rsa".to_string())
-                .with_architecture("aarch64".to_string()),
+                .with_architecture("aarch64".to_string())
+                .with_fex_path("~/dev/FEX/out/install/Release/bin/FEXInterpreter".to_string()),
         );
 
         config.save()?;

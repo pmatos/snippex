@@ -360,7 +360,11 @@ impl ValidateCommand {
 
             if fex_result.is_none() {
                 println!("Running FEX-Emu simulation...");
-                let emulator = EmulatorConfig::fex_emu();
+                // Use configured FEX path if available in remote config
+                let fex_path = fex_target
+                    .remote_config()
+                    .and_then(|rc| rc.fex_path.as_deref());
+                let emulator = EmulatorConfig::fex_emu_with_optional_path(fex_path);
                 match self.run_simulation(
                     extraction,
                     &analysis,

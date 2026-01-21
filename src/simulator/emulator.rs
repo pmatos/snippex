@@ -80,6 +80,34 @@ impl EmulatorConfig {
         }
     }
 
+    /// Creates a FEX-Emu configuration with a specific binary path.
+    /// Use this when the FEX path is configured explicitly.
+    pub fn fex_emu_with_path(path: &str) -> Self {
+        // Expand ~ to home directory
+        let binary = if let Some(stripped) = path.strip_prefix("~/") {
+            if let Ok(home) = std::env::var("HOME") {
+                format!("{}/{}", home, stripped)
+            } else {
+                path.to_string()
+            }
+        } else {
+            path.to_string()
+        };
+        Self::FexEmu {
+            binary,
+            args: vec![],
+        }
+    }
+
+    /// Creates a FEX-Emu configuration, optionally using a configured path.
+    /// If path is None, uses auto-discovery to find FEXInterpreter.
+    pub fn fex_emu_with_optional_path(path: Option<&str>) -> Self {
+        match path {
+            Some(p) => Self::fex_emu_with_path(p),
+            None => Self::fex_emu(),
+        }
+    }
+
     /// Searches for FEXInterpreter in common installation locations
     fn find_fex_binary() -> Option<String> {
         use std::path::Path;
