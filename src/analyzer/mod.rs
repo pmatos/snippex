@@ -94,15 +94,31 @@ impl Analyzer {
             pointer_registers: HashMap::new(),
         };
 
-        let mut read_regs = HashSet::new();
-        let mut written_regs = HashSet::new();
+        let mut written_before: HashSet<String> = HashSet::new();
+        let mut all_written: HashSet<String> = HashSet::new();
         let mut last_offset = base_address;
 
         for insn in insns.iter() {
             last_offset = insn.address() + insn.bytes().len() as u64;
 
-            // Analyze registers
-            self.analyze_registers(&cs, insn, &mut read_regs, &mut written_regs)?;
+            // Analyze registers for this instruction
+            let mut insn_reads = HashSet::new();
+            let mut insn_writes = HashSet::new();
+            self.analyze_registers(&cs, insn, &mut insn_reads, &mut insn_writes)?;
+
+            // A register is live-in if it's read before being written in any previous instruction
+            // Note: In a single instruction, reads happen before writes, so if a register
+            // is both read and written in the same instruction, it's live-in if not written before
+            for reg in &insn_reads {
+                if !written_before.contains(reg) {
+                    analysis.live_in_registers.insert(reg.clone());
+                }
+            }
+
+            // Update written_before with registers written in this instruction
+            // (they won't be live-in for future instructions)
+            written_before.extend(insn_writes.iter().cloned());
+            all_written.extend(insn_writes);
 
             // Analyze control flow
             if let Some(exit) = self.analyze_control_flow(
@@ -124,15 +140,8 @@ impl Analyzer {
             }
         }
 
-        // Calculate live-in registers (read before written)
-        for reg in &read_regs {
-            if !written_regs.contains(reg) {
-                analysis.live_in_registers.insert(reg.clone());
-            }
-        }
-
         // All written registers are potentially live-out
-        analysis.live_out_registers = written_regs;
+        analysis.live_out_registers = all_written;
 
         // If no explicit exit found, it falls through
         if analysis.exit_points.is_empty() {
@@ -325,10 +334,20 @@ impl Analyzer {
         let mut registers = Vec::new();
 
         // List of x86/x86_64 registers to look for
+        // Note: Order matters for overlapping names - check longer patterns first
         let reg_patterns = [
-            // 64-bit registers
-            "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "r8", "r9", "r10", "r11", "r12",
-            "r13", "r14", "r15", // 32-bit registers
+            // AVX-512 ZMM registers (check first due to length)
+            "zmm31", "zmm30", "zmm29", "zmm28", "zmm27", "zmm26", "zmm25", "zmm24", "zmm23",
+            "zmm22", "zmm21", "zmm20", "zmm19", "zmm18", "zmm17", "zmm16", "zmm15", "zmm14",
+            "zmm13", "zmm12", "zmm11", "zmm10", "zmm9", "zmm8", "zmm7", "zmm6", "zmm5", "zmm4",
+            "zmm3", "zmm2", "zmm1", "zmm0", // AVX YMM registers
+            "ymm15", "ymm14", "ymm13", "ymm12", "ymm11", "ymm10", "ymm9", "ymm8", "ymm7", "ymm6",
+            "ymm5", "ymm4", "ymm3", "ymm2", "ymm1", "ymm0", // SSE XMM registers
+            "xmm15", "xmm14", "xmm13", "xmm12", "xmm11", "xmm10", "xmm9", "xmm8", "xmm7", "xmm6",
+            "xmm5", "xmm4", "xmm3", "xmm2", "xmm1", "xmm0",
+            // 64-bit GPR registers (check r10-r15 before r1 to avoid partial matches)
+            "r15", "r14", "r13", "r12", "r11", "r10", "r9", "r8", "rax", "rbx", "rcx", "rdx", "rsi",
+            "rdi", "rbp", "rsp", // 32-bit registers
             "eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp", // 16-bit registers
             "ax", "bx", "cx", "dx", "si", "di", "bp", "sp", // 8-bit registers
             "al", "bl", "cl", "dl", "ah", "bh", "ch", "dh",
@@ -352,7 +371,7 @@ impl Analyzer {
 
                     if before_ok && after_ok {
                         // Normalize to canonical form (prefer 64-bit names)
-                        let canonical = self.normalize_register_to_64bit(reg);
+                        let canonical = self.normalize_register(reg);
                         if !registers.contains(&canonical) {
                             registers.push(canonical);
                         }
@@ -364,7 +383,17 @@ impl Analyzer {
         registers
     }
 
-    fn normalize_register_to_64bit(&self, reg: &str) -> String {
+    fn normalize_register(&self, reg: &str) -> String {
+        // For vector registers (xmm, ymm, zmm), keep them as-is because they have
+        // different aliasing semantics than GPRs:
+        // - Writing to xmm0 zeros upper bits of ymm0/zmm0
+        // - Writing to ymm0 zeros upper bits of zmm0
+        // So xmm0, ymm0, zmm0 should remain distinct in analysis.
+        if reg.starts_with("xmm") || reg.starts_with("ymm") || reg.starts_with("zmm") {
+            return reg.to_string();
+        }
+
+        // For GPRs, normalize to 64-bit canonical form
         match reg {
             "eax" | "ax" | "al" | "ah" => "rax".to_string(),
             "ebx" | "bx" | "bl" | "bh" => "rbx".to_string(),
@@ -616,7 +645,7 @@ impl Analyzer {
                 if !is_scaled {
                     // This is likely the base register
                     if base_reg.is_none() || pos < base_reg_pos.unwrap() {
-                        base_reg = Some(self.normalize_register_to_64bit(reg));
+                        base_reg = Some(self.normalize_register(reg));
                         base_reg_pos = Some(pos);
                     }
                 }
