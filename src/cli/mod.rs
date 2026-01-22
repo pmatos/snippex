@@ -3,6 +3,7 @@ pub mod cache;
 pub mod compare;
 pub mod completions;
 pub mod config;
+pub mod disasm;
 pub mod export;
 pub mod extract;
 pub mod import;

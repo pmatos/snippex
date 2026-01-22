@@ -2020,6 +2020,7 @@ dependencies = [
  "chrono",
  "clap",
  "clap_complete",
+ "console",
  "csv",
  "ctrlc",
  "dirs",

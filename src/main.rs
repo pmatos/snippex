@@ -19,6 +19,7 @@ use cli::cache::CacheCommand;
 use cli::compare::CompareCommand;
 use cli::completions::CompletionsCommand;
 use cli::config::ConfigCommand;
+use cli::disasm::DisasmCommand;
 use cli::export::ExportCommand;
 use cli::extract::ExtractCommand;
 use cli::import::ImportCommand;
@@ -87,6 +88,8 @@ enum Commands {
     List(ListCommand),
     Remove(RemoveCommand),
     Analyze(AnalyzeCommand),
+    /// Show disassembly of a block with color-coded analysis
+    Disasm(DisasmCommand),
     Simulate(SimulateCommand),
     SimulateRemote(SimulateRemoteCommand),
     Validate(ValidateCommand),
@@ -153,6 +156,7 @@ fn main() -> Result<()> {
         Commands::List(cmd) => cmd.execute(),
         Commands::Remove(cmd) => cmd.execute(),
         Commands::Analyze(cmd) => cmd.execute(),
+        Commands::Disasm(cmd) => cmd.execute(),
         Commands::Simulate(cmd) => cmd.execute(),
         Commands::SimulateRemote(cmd) => cmd.execute(),
         Commands::Validate(cmd) => cmd.execute(),

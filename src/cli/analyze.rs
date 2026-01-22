@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use capstone::prelude::*;
 use clap::Args;
 use std::path::PathBuf;
 
@@ -20,6 +21,9 @@ pub struct AnalyzeCommand {
 
     #[arg(short, long, help = "Show detailed analysis information")]
     verbose: bool,
+
+    #[arg(short = 'D', long, help = "Show disassembly of the block")]
+    disassemble: bool,
 }
 
 impl AnalyzeCommand {
@@ -71,6 +75,12 @@ impl AnalyzeCommand {
             extraction.start_address, extraction.end_address
         );
         println!();
+
+        // Show disassembly if requested
+        if self.disassemble {
+            self.print_disassembly(extraction)?;
+            println!();
+        }
 
         // Create analyzer based on architecture
         let analyzer = Analyzer::new(&extraction.binary_architecture);
@@ -194,6 +204,53 @@ impl AnalyzeCommand {
 
         println!();
         println!("✓ Analysis completed and stored successfully");
+
+        Ok(())
+    }
+
+    fn print_disassembly(&self, extraction: &crate::db::ExtractionInfo) -> Result<()> {
+        let cs = match extraction.binary_architecture.as_str() {
+            "x86_64" => Capstone::new()
+                .x86()
+                .mode(arch::x86::ArchMode::Mode64)
+                .syntax(arch::x86::ArchSyntax::Intel)
+                .detail(true)
+                .build()
+                .map_err(|e| anyhow!("Failed to create disassembler: {}", e))?,
+            "i386" | "x86" => Capstone::new()
+                .x86()
+                .mode(arch::x86::ArchMode::Mode32)
+                .syntax(arch::x86::ArchSyntax::Intel)
+                .detail(true)
+                .build()
+                .map_err(|e| anyhow!("Failed to create disassembler: {}", e))?,
+            arch => {
+                return Err(anyhow!(
+                    "Unsupported architecture for disassembly: {}",
+                    arch
+                ))
+            }
+        };
+
+        let insns = cs
+            .disasm_all(&extraction.assembly_block, extraction.start_address)
+            .map_err(|e| anyhow!("Disassembly failed: {}", e))?;
+
+        println!(
+            "Disassembly ({} bytes, {} instructions):",
+            extraction.assembly_block.len(),
+            insns.len()
+        );
+        println!("{}", "─".repeat(50));
+
+        for insn in insns.iter() {
+            println!(
+                "  0x{:08x}:  {} {}",
+                insn.address(),
+                insn.mnemonic().unwrap_or("???"),
+                insn.op_str().unwrap_or("")
+            );
+        }
 
         Ok(())
     }
