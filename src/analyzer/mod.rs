@@ -684,3 +684,75 @@ impl Analyzer {
         offset
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_vector_register_live_in_detection() {
+        // vpminud xmm3, xmm2, xmm3 - reads xmm2 and xmm3, writes xmm3
+        // Both xmm2 and xmm3 should be detected as live-in since they're read
+        // before xmm3 is written (the instruction reads both sources first)
+        let code: &[u8] = &[0xc4, 0xe2, 0x69, 0x3b, 0xdb]; // vpminud xmm3, xmm2, xmm3
+        let analyzer = Analyzer::new("x86_64");
+        let analysis = analyzer.analyze_block(code, 0x1000).unwrap();
+
+        // xmm2 should be live-in (read, never written)
+        assert!(
+            analysis.live_in_registers.contains("xmm2"),
+            "xmm2 should be live-in, but got: {:?}",
+            analysis.live_in_registers
+        );
+
+        // xmm3 should be live-in (read before written in same instruction)
+        assert!(
+            analysis.live_in_registers.contains("xmm3"),
+            "xmm3 should be live-in, but got: {:?}",
+            analysis.live_in_registers
+        );
+    }
+
+    #[test]
+    fn test_ymm_register_detection() {
+        // vaddps ymm0, ymm1, ymm2 - reads ymm1 and ymm2, writes ymm0
+        let code: &[u8] = &[0xc5, 0xf4, 0x58, 0xc2]; // vaddps ymm0, ymm1, ymm2
+        let analyzer = Analyzer::new("x86_64");
+        let analysis = analyzer.analyze_block(code, 0x1000).unwrap();
+
+        assert!(
+            analysis.live_in_registers.contains("ymm1"),
+            "ymm1 should be live-in, but got: {:?}",
+            analysis.live_in_registers
+        );
+        assert!(
+            analysis.live_in_registers.contains("ymm2"),
+            "ymm2 should be live-in, but got: {:?}",
+            analysis.live_in_registers
+        );
+        assert!(
+            analysis.live_out_registers.contains("ymm0"),
+            "ymm0 should be live-out, but got: {:?}",
+            analysis.live_out_registers
+        );
+    }
+
+    #[test]
+    fn test_mixed_gpr_and_vector_registers() {
+        // vmovmskps edx, ymm1 - reads ymm1, writes edx
+        let code: &[u8] = &[0xc5, 0xfc, 0x50, 0xd1]; // vmovmskps edx, ymm1
+        let analyzer = Analyzer::new("x86_64");
+        let analysis = analyzer.analyze_block(code, 0x1000).unwrap();
+
+        assert!(
+            analysis.live_in_registers.contains("ymm1"),
+            "ymm1 should be live-in, but got: {:?}",
+            analysis.live_in_registers
+        );
+        assert!(
+            analysis.live_out_registers.contains("rdx"),
+            "rdx should be live-out, but got: {:?}",
+            analysis.live_out_registers
+        );
+    }
+}
