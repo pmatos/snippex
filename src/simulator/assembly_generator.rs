@@ -89,8 +89,46 @@ impl AssemblyGenerator {
             preamble.push_str(&mmap_code);
         }
 
-        // Set up registers
-        for (reg, value) in &initial_state.registers {
+        // Set up registers - handle vector registers specially
+        // Vector registers (XMM/YMM/ZMM) can't use "mov reg, imm" - must go through GPR
+        // Initialize vector registers FIRST (using rax as scratch), then GPRs
+        // This ensures rax gets its correct final value if it's a live-in register
+
+        let vector_regs: Vec<_> = initial_state
+            .registers
+            .iter()
+            .filter(|(r, _)| r.starts_with("xmm") || r.starts_with("ymm") || r.starts_with("zmm"))
+            .collect();
+        let mut gpr_regs: Vec<_> = initial_state
+            .registers
+            .iter()
+            .filter(|(r, _)| {
+                !r.starts_with("xmm") && !r.starts_with("ymm") && !r.starts_with("zmm")
+            })
+            .collect();
+
+        // Sort GPRs to ensure rax is initialized last (in case it was clobbered by vector init)
+        gpr_regs.sort_by(|(a, _), (b, _)| {
+            let a_is_rax = *a == "rax";
+            let b_is_rax = *b == "rax";
+            a_is_rax.cmp(&b_is_rax) // false < true, so rax comes last
+        });
+
+        // Initialize vector registers using rax as intermediate
+        for (reg, value) in &vector_regs {
+            preamble.push_str(&format!("    mov rax, 0x{value:016x}\n"));
+            if reg.starts_with("xmm") {
+                preamble.push_str(&format!("    movq {reg}, rax\n"));
+            } else {
+                // For YMM/ZMM, use vmovq with the corresponding XMM register
+                // VEX-encoded vmovq zeros the upper bits of YMM/ZMM automatically
+                let xmm_reg = reg.replace("ymm", "xmm").replace("zmm", "xmm");
+                preamble.push_str(&format!("    vmovq {xmm_reg}, rax\n"));
+            }
+        }
+
+        // Initialize GPRs (rax last to restore it if it was clobbered)
+        for (reg, value) in &gpr_regs {
             preamble.push_str(&format!("    mov {reg}, 0x{value:016x}\n"));
         }
 
