@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{Args, ValueEnum};
+use indicatif::{ProgressBar, ProgressStyle};
 use log::debug;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -397,9 +398,20 @@ impl ExtractCommand {
         let candidate_count = self.count * 10; // Sample 10x the requested count
         let mut candidates: Vec<CandidateBlock> = Vec::new();
 
-        if !self.quiet {
-            println!("Sampling {} candidate blocks...", candidate_count);
-        }
+        // Create progress bar
+        let progress = if !self.quiet {
+            let pb = ProgressBar::new(candidate_count as u64);
+            pb.set_style(
+                ProgressStyle::default_bar()
+                    .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%) {msg}")
+                    .unwrap()
+                    .progress_chars("█▓▒░"),
+            );
+            pb.set_message("sampling candidates...");
+            Some(pb)
+        } else {
+            None
+        };
 
         for _ in 0..candidate_count {
             let result = if !filter.is_empty() {
@@ -427,6 +439,15 @@ impl ExtractCommand {
                     });
                 }
             }
+
+            if let Some(ref pb) = progress {
+                pb.inc(1);
+                pb.set_message(format!("{} valid candidates", candidates.len()));
+            }
+        }
+
+        if let Some(pb) = progress {
+            pb.finish_with_message(format!("found {} valid candidates", candidates.len()));
         }
 
         if candidates.is_empty() {
