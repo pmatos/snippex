@@ -2,6 +2,31 @@
 
 This tutorial demonstrates how to use Snippex to extract, analyze, simulate, and validate x86 assembly blocks from real binaries like SuperTuxKart, comparing native x86 execution against FEX-Emu on ARM64.
 
+## The Core Workflow
+
+Snippex is designed to find bugs in FEX-Emu by comparing its output against native x86 execution (the oracle):
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     x86 Machine (Ground Truth)              │
+├─────────────────────────────────────────────────────────────┤
+│  1. snippex extract <binary>     # Extract assembly blocks  │
+│  2. snippex analyze <N>          # Analyze register usage   │
+│  3. snippex simulate <N> --runs 100  # Run natively (oracle)│
+│  4. snippex export -o results.json   # Export for transfer  │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼ (transfer file)
+┌─────────────────────────────────────────────────────────────┐
+│                   ARM64 Machine (FEX Testing)               │
+├─────────────────────────────────────────────────────────────┤
+│  5. snippex import-results results.json  # Import oracle    │
+│  6. snippex emulate <N>     # Replay through FEX & compare  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key insight:** Native x86 execution is the ground truth. The `emulate` command takes stored native simulation results (with their initial states), replays them through FEX-Emu, and compares the outputs. Any discrepancy indicates a potential FEX-Emu bug.
+
 ## Prerequisites
 
 ### Local Machine (x86_64)
@@ -462,8 +487,9 @@ snippex export -o session_results.json --simulated-only
 | `extract` | Extract assembly blocks from binary |
 | `list` | List extracted blocks |
 | `analyze` | Disassemble and analyze a block |
-| `simulate` | Run native simulation |
-| `validate` | Compare native vs FEX-Emu |
+| `simulate` | Run native simulation (ground truth) |
+| `emulate` | Replay stored simulations through FEX-Emu and compare |
+| `validate` | Compare native vs FEX-Emu (same machine) |
 | `validate-batch` | Batch validation |
 | `export` | Export blocks to JSON |
 | `import-results` | Import simulation results |

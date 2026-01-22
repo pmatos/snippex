@@ -20,6 +20,7 @@ use cli::compare::CompareCommand;
 use cli::completions::CompletionsCommand;
 use cli::config::ConfigCommand;
 use cli::disasm::DisasmCommand;
+use cli::emulate::EmulateCommand;
 use cli::export::ExportCommand;
 use cli::extract::ExtractCommand;
 use cli::import::ImportCommand;
@@ -92,6 +93,8 @@ enum Commands {
     Disasm(DisasmCommand),
     Simulate(SimulateCommand),
     SimulateRemote(SimulateRemoteCommand),
+    /// Replay stored native simulations through FEX-Emu and compare results
+    Emulate(EmulateCommand),
     Validate(ValidateCommand),
     ValidateBatch(ValidateBatchCommand),
     Export(ExportCommand),
@@ -159,6 +162,7 @@ fn main() -> Result<()> {
         Commands::Disasm(cmd) => cmd.execute(),
         Commands::Simulate(cmd) => cmd.execute(),
         Commands::SimulateRemote(cmd) => cmd.execute(),
+        Commands::Emulate(cmd) => cmd.execute(),
         Commands::Validate(cmd) => cmd.execute(),
         Commands::ValidateBatch(cmd) => cmd.execute(),
         Commands::Export(cmd) => cmd.execute(),

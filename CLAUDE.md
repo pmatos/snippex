@@ -10,17 +10,37 @@ Snippex is designed to find bugs in FEX-Emu, an x86-on-ARM64 dynamic binary tran
 
 The testing methodology requires **native x86 execution as ground truth**:
 
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     x86 Machine (Ground Truth)              │
+├─────────────────────────────────────────────────────────────┤
+│  1. snippex extract <binary>     # Extract assembly blocks  │
+│  2. snippex analyze <N>          # Analyze register usage   │
+│  3. snippex simulate <N> --runs 100  # Run natively (oracle)│
+│  4. snippex export -o results.json   # Export for transfer  │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼ (transfer file)
+┌─────────────────────────────────────────────────────────────┐
+│                   ARM64 Machine (FEX Testing)               │
+├─────────────────────────────────────────────────────────────┤
+│  5. snippex import-results results.json  # Import oracle    │
+│  6. snippex emulate <N>     # Replay through FEX & compare  │
+└─────────────────────────────────────────────────────────────┘
+```
+
 1. **x86 Machine** (or cloud VM with x86/x86_64 CPU):
-   - Extract x86/x86_64 assembly blocks from binaries
-   - Analyze blocks for register/memory usage patterns
-   - Simulate blocks natively to obtain ground truth results
-   - Export simulation results to JSON for transfer
+   - `snippex extract <binary>` - Extract x86/x86_64 assembly blocks from binaries
+   - `snippex analyze <N>` - Analyze blocks for register/memory usage patterns
+   - `snippex simulate <N> --runs 100` - Simulate blocks natively to obtain ground truth results
+   - `snippex export -o results.json` - Export simulation results to JSON for transfer
 
 2. **ARM64 Machine** (FEX-Emu testing environment):
-   - Import native simulation results (ground truth)
-   - Simulate same blocks through FEX-Emu
-   - Compare FEX-Emu results against native ground truth
+   - `snippex import-results results.json` - Import native simulation results (ground truth)
+   - `snippex emulate <N>` - Replay stored simulations through FEX-Emu and compare
    - Discrepancies indicate potential FEX-Emu bugs
+
+**Key insight:** The `emulate` command loads stored native simulation results (with their initial states), replays them through FEX-Emu using the exact same inputs, and compares the outputs. Any discrepancy indicates a potential FEX-Emu bug.
 
 ### Why Native Execution is Essential
 
@@ -73,7 +93,7 @@ For development workflow, always run `make pre-commit` before committing changes
 Snippex is a Rust CLI tool for extracting and analyzing assembly code blocks from ELF and PE binaries, with a git-like interface.
 
 ### Core Modules
-- **cli/**: Command-line interface with subcommands (extract, import, list, remove, analyze, simulate)
+- **cli/**: Command-line interface with subcommands (extract, import, list, remove, analyze, simulate, emulate, validate)
 - **extractor/**: Binary parsing and assembly extraction using `object` crate
 - **db/**: SQLite database operations with `rusqlite` for storage and deduplication
 - **analyzer/**: Assembly code analysis functionality using Capstone disassembler

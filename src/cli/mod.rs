@@ -4,6 +4,7 @@ pub mod compare;
 pub mod completions;
 pub mod config;
 pub mod disasm;
+pub mod emulate;
 pub mod export;
 pub mod extract;
 pub mod import;
