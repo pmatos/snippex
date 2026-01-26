@@ -216,7 +216,7 @@ impl AsmTest {
         let temp_dir = TempDir::new()?;
         let asm_file = temp_dir.path().join(format!("{}.asm", self.name));
         let obj_file = temp_dir.path().join(format!("{}.o", self.name));
-        let elf_file = temp_dir.path().join(self.name.to_string());
+        let elf_file = temp_dir.path().join(&self.name);
 
         // Write NASM source
         let nasm_content = self.create_nasm_file()?;
