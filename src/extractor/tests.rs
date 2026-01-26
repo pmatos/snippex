@@ -398,4 +398,79 @@ mod extractor_tests {
         // At least some blocks should match
         assert!(matching > 0 || total > 0);
     }
+
+    #[test]
+    fn test_extraction_filter_control_flow() {
+        let filter = ExtractionFilter::new().with_control_flow(true);
+
+        assert!(!filter.is_empty());
+        assert_eq!(filter.require_control_flow, Some(true));
+
+        let filter = ExtractionFilter::new().with_control_flow(false);
+
+        assert!(!filter.is_empty());
+        assert_eq!(filter.require_control_flow, Some(false));
+    }
+
+    #[test]
+    fn test_check_block_filter_control_flow() {
+        let binary_file = create_test_binary();
+        let extractor = Extractor::new(binary_file.path().to_path_buf()).unwrap();
+
+        // Sample many blocks to find some with and without control flow
+        let mut found_with_control_flow = false;
+        let mut found_without_control_flow = false;
+
+        for _ in 0..50 {
+            if let Ok((start_addr, _, assembly_block)) = extractor.extract_random_aligned_block() {
+                let filter = ExtractionFilter::new();
+                if let Ok(result) = extractor.check_block_filter(&assembly_block, start_addr, &filter) {
+                    if result.has_control_flow {
+                        found_with_control_flow = true;
+
+                        // Verify filter requiring control flow matches
+                        let filter_require = ExtractionFilter::new().with_control_flow(true);
+                        let match_result = extractor
+                            .check_block_filter(&assembly_block, start_addr, &filter_require)
+                            .unwrap();
+                        assert!(match_result.matches);
+
+                        // Verify filter excluding control flow does not match
+                        let filter_exclude = ExtractionFilter::new().with_control_flow(false);
+                        let match_result = extractor
+                            .check_block_filter(&assembly_block, start_addr, &filter_exclude)
+                            .unwrap();
+                        assert!(!match_result.matches);
+                    } else {
+                        found_without_control_flow = true;
+
+                        // Verify filter excluding control flow matches
+                        let filter_exclude = ExtractionFilter::new().with_control_flow(false);
+                        let match_result = extractor
+                            .check_block_filter(&assembly_block, start_addr, &filter_exclude)
+                            .unwrap();
+                        assert!(match_result.matches);
+
+                        // Verify filter requiring control flow does not match
+                        let filter_require = ExtractionFilter::new().with_control_flow(true);
+                        let match_result = extractor
+                            .check_block_filter(&assembly_block, start_addr, &filter_require)
+                            .unwrap();
+                        assert!(!match_result.matches);
+                    }
+                }
+            }
+
+            // Early exit if we found both types
+            if found_with_control_flow && found_without_control_flow {
+                break;
+            }
+        }
+
+        // At least one type should be found (most binaries have control flow)
+        assert!(
+            found_with_control_flow || found_without_control_flow,
+            "Should find at least some blocks to test"
+        );
+    }
 }

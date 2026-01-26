@@ -65,6 +65,8 @@ pub struct ExtractionFilter {
     pub max_size: Option<usize>,
     /// Require memory access instructions
     pub require_memory_access: Option<bool>,
+    /// Require control flow instructions (jumps, calls, returns)
+    pub require_control_flow: Option<bool>,
     /// Required instruction categories (any match)
     pub instruction_categories: Option<HashSet<InstructionCategory>>,
 }
@@ -89,6 +91,11 @@ impl ExtractionFilter {
         self
     }
 
+    pub fn with_control_flow(mut self, require: bool) -> Self {
+        self.require_control_flow = Some(require);
+        self
+    }
+
     pub fn with_instruction_categories(mut self, categories: HashSet<InstructionCategory>) -> Self {
         self.instruction_categories = Some(categories);
         self
@@ -98,6 +105,7 @@ impl ExtractionFilter {
         self.min_size.is_none()
             && self.max_size.is_none()
             && self.require_memory_access.is_none()
+            && self.require_control_flow.is_none()
             && self.instruction_categories.is_none()
     }
 
@@ -121,7 +129,10 @@ pub struct FilterMatch {
     pub matches: bool,
     #[allow(dead_code)]
     pub block_size: usize,
+    #[allow(dead_code)]
     pub has_memory_access: bool,
+    #[allow(dead_code)]
+    pub has_control_flow: bool,
     pub categories_found: HashSet<InstructionCategory>,
     #[allow(dead_code)]
     pub instruction_count: usize,
@@ -580,6 +591,9 @@ impl Extractor {
             categories_found.insert(category);
         }
 
+        // Detect control flow by checking if Branch category is present
+        let has_control_flow = categories_found.contains(&InstructionCategory::Branch);
+
         // Check size constraints
         let size_match = match (filter.min_size, filter.max_size) {
             (Some(min), Some(max)) => block_size >= min && block_size <= max,
@@ -595,18 +609,26 @@ impl Extractor {
             None => true,
         };
 
+        // Check control flow constraint
+        let control_flow_match = match filter.require_control_flow {
+            Some(true) => has_control_flow,
+            Some(false) => !has_control_flow,
+            None => true,
+        };
+
         // Check instruction category constraint
         let category_match = match &filter.instruction_categories {
             Some(required) => !categories_found.is_disjoint(required),
             None => true,
         };
 
-        let matches = size_match && memory_match && category_match;
+        let matches = size_match && memory_match && control_flow_match && category_match;
 
         Ok(FilterMatch {
             matches,
             block_size,
             has_memory_access,
+            has_control_flow,
             categories_found,
             instruction_count,
         })

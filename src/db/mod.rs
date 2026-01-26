@@ -504,11 +504,37 @@ impl Database {
             |row| row.get(0),
         )?;
 
-        // Delete the extraction
-        let affected = tx.execute(
-            "DELETE FROM extractions
+        // Find the extraction_id
+        let extraction_id: i64 = tx.query_row(
+            "SELECT id FROM extractions
              WHERE binary_id = ?1 AND start_address = ?2 AND end_address = ?3",
             params![binary_id, start_addr as i64, end_addr as i64],
+            |row| row.get(0),
+        )?;
+
+        // Delete related records from all tables that reference this extraction
+        // (in correct order due to foreign key constraints)
+        // Use a helper to ignore "no such table" errors for older databases
+        let delete_related = |tx: &rusqlite::Transaction, table: &str| {
+            let sql = format!("DELETE FROM {} WHERE extraction_id = ?1", table);
+            match tx.execute(&sql, params![extraction_id]) {
+                Ok(_) => Ok(()),
+                Err(e) if e.to_string().contains("no such table") => Ok(()),
+                Err(e) => Err(e),
+            }
+        };
+
+        delete_related(&tx, "fex_test_results")?;
+        delete_related(&tx, "fex_baselines")?;
+        delete_related(&tx, "batch_results")?;
+        delete_related(&tx, "simulation_cache")?;
+        delete_related(&tx, "simulations")?;
+        delete_related(&tx, "analyses")?;
+
+        // Delete the extraction itself
+        let affected = tx.execute(
+            "DELETE FROM extractions WHERE id = ?1",
+            params![extraction_id],
         )?;
 
         if affected == 0 {
@@ -540,8 +566,21 @@ impl Database {
         })? as usize;
 
         // Delete in correct order due to foreign key constraints:
-        // 1. Delete all analyses first (references extractions)
-        tx.execute("DELETE FROM analyses", [])?;
+        // 1. Delete all tables that reference extractions
+        // Ignore "no such table" errors for older databases
+        let delete_table = |tx: &rusqlite::Transaction, table: &str| {
+            match tx.execute(&format!("DELETE FROM {}", table), []) {
+                Ok(_) => Ok(()),
+                Err(e) if e.to_string().contains("no such table") => Ok(()),
+                Err(e) => Err(e),
+            }
+        };
+        delete_table(&tx, "fex_test_results")?;
+        delete_table(&tx, "fex_baselines")?;
+        delete_table(&tx, "batch_results")?;
+        delete_table(&tx, "simulation_cache")?;
+        delete_table(&tx, "simulations")?;
+        delete_table(&tx, "analyses")?;
 
         // 2. Delete all extractions (references binaries)
         tx.execute("DELETE FROM extractions", [])?;

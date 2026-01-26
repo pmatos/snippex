@@ -60,6 +60,12 @@ pub struct ExtractCommand {
     #[arg(long, help = "Only extract blocks without memory access instructions")]
     no_memory_access: bool,
 
+    #[arg(long, help = "Only extract blocks with control flow instructions (jumps, calls, returns)")]
+    has_control_flow: bool,
+
+    #[arg(long, help = "Only extract blocks without control flow instructions")]
+    no_control_flow: bool,
+
     #[arg(
         long,
         value_delimiter = ',',
@@ -114,6 +120,12 @@ impl ExtractCommand {
         if self.has_memory_access && self.no_memory_access {
             return Err(anyhow::anyhow!(
                 "Cannot use both --has-memory-access and --no-memory-access"
+            ));
+        }
+
+        if self.has_control_flow && self.no_control_flow {
+            return Err(anyhow::anyhow!(
+                "Cannot use both --has-control-flow and --no-control-flow"
             ));
         }
 
@@ -265,6 +277,12 @@ impl ExtractCommand {
             filter = filter.with_memory_access(false);
         }
 
+        if self.has_control_flow {
+            filter = filter.with_control_flow(true);
+        } else if self.no_control_flow {
+            filter = filter.with_control_flow(false);
+        }
+
         if let Some(ref types) = self.instruction_types {
             let mut categories = HashSet::new();
             for type_str in types {
@@ -303,6 +321,12 @@ impl ExtractCommand {
             criteria.push(format!(
                 "memory access: {}",
                 if mem { "required" } else { "excluded" }
+            ));
+        }
+        if let Some(cf) = filter.require_control_flow {
+            criteria.push(format!(
+                "control flow: {}",
+                if cf { "required" } else { "excluded" }
             ));
         }
         if let Some(ref cats) = filter.instruction_categories {

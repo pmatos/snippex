@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use clap::Args;
 use std::path::PathBuf;
 
+use crate::cli::block_range::BlockRange;
 use crate::db::Database;
 
 #[derive(Args)]
@@ -14,46 +15,47 @@ pub struct RemoveCommand {
     )]
     database: PathBuf,
 
-    #[arg(short, long, help = "Remove all blocks from database")]
-    all: bool,
-
     #[arg(
-        value_name = "BLOCK_NUMBER",
-        help = "Block number to remove (as shown by list command)"
+        value_name = "BLOCKS",
+        help = "Blocks to remove: 5, 1-10, 5-, 3,7,12, or all"
     )]
-    block_number: Option<usize>,
+    blocks: Option<BlockRange>,
 }
 
 impl RemoveCommand {
     pub fn execute(self) -> Result<()> {
-        if !self.all && self.block_number.is_none() {
-            return Err(anyhow!(
-                "Must specify either --all or a block number to remove"
-            ));
-        }
-
-        if self.all && self.block_number.is_some() {
-            return Err(anyhow!("Cannot specify both --all and a block number"));
-        }
+        let blocks = match self.blocks {
+            Some(b) => b,
+            None => {
+                return Err(anyhow!(
+                    "Must specify blocks to remove.\n\n\
+                     Examples:\n  \
+                     snippex remove 5        - remove block 5\n  \
+                     snippex remove 1-10     - remove blocks 1 through 10\n  \
+                     snippex remove 3,7,12   - remove specific blocks\n  \
+                     snippex remove all      - remove all blocks"
+                ));
+            }
+        };
 
         // Check if database exists
         if !self.database.exists() {
-            if self.all {
+            if matches!(blocks, BlockRange::All) {
                 println!("✓ No database found, nothing to remove");
+                return Ok(());
             } else {
                 return Err(anyhow!("No database found"));
             }
-            return Ok(());
         }
 
         let mut db = Database::new(&self.database)?;
 
-        if self.all {
+        // Handle "all" specially for efficiency
+        if matches!(blocks, BlockRange::All) {
             println!("Removing all blocks from database...");
             let count = match db.remove_all_extractions() {
                 Ok(count) => count,
                 Err(e) => {
-                    // Database exists but tables don't - treat as empty
                     if e.to_string().contains("no such table") {
                         println!("✓ No blocks found, nothing to remove");
                         return Ok(());
@@ -62,24 +64,27 @@ impl RemoveCommand {
                     }
                 }
             };
-            println!("✓ Removed {count} blocks from database");
-        } else if let Some(block_num) = self.block_number {
-            // Get list of extractions to find the one to delete
-            let extractions = match db.list_extractions() {
-                Ok(extractions) => extractions,
-                Err(_) => {
-                    return Err(anyhow!("No blocks found in database"));
-                }
-            };
+            println!("✓ Removed {count} block(s) from database");
+            return Ok(());
+        }
 
-            if block_num == 0 || block_num > extractions.len() {
-                return Err(anyhow!(
-                    "Invalid block number. Valid range: 1-{}",
-                    extractions.len()
-                ));
+        // Get list of extractions
+        let extractions = match db.list_extractions() {
+            Ok(extractions) => extractions,
+            Err(_) => {
+                return Err(anyhow!("No blocks found in database"));
             }
+        };
 
-            // Block numbers are 1-indexed in the UI, but 0-indexed in the vector
+        if extractions.is_empty() {
+            return Err(anyhow!("No blocks found in database"));
+        }
+
+        // Resolve block range to specific numbers
+        let block_nums = blocks.resolve(extractions.len())?;
+
+        if block_nums.len() == 1 {
+            let block_num = block_nums[0];
             let extraction = &extractions[block_num - 1];
 
             println!("Removing block #{block_num} from database...");
@@ -95,6 +100,26 @@ impl RemoveCommand {
                 &extraction.binary_hash,
             )?;
             println!("✓ Block removed successfully");
+        } else {
+            println!("Removing {} blocks from database...", block_nums.len());
+
+            // Remove in reverse order to avoid index shifting issues
+            let mut sorted_nums = block_nums.clone();
+            sorted_nums.sort();
+            sorted_nums.reverse();
+
+            let mut removed = 0;
+            for block_num in sorted_nums {
+                let extraction = &extractions[block_num - 1];
+                db.remove_extraction(
+                    extraction.start_address,
+                    extraction.end_address,
+                    &extraction.binary_hash,
+                )?;
+                removed += 1;
+            }
+
+            println!("✓ Removed {removed} block(s) successfully");
         }
 
         Ok(())

@@ -419,6 +419,17 @@ impl Analyzer {
             .map_err(|e| anyhow!("Failed to get instruction details: {}", e))?;
         let groups = detail.groups();
 
+        // Check if it's a call BEFORE checking for jump, because Capstone puts
+        // call instructions in both CS_GRP_CALL (2) and CS_GRP_JUMP (7)
+        if groups.contains(&InsnGroupId(2)) {
+            // CS_GRP_CALL
+            return Ok(Some(ExitPoint {
+                offset: insn.address(),
+                exit_type: ExitType::Call,
+                target: self.get_jump_target(cs, insn),
+            }));
+        }
+
         // Check if it's a jump
         if groups.contains(&InsnGroupId(7)) {
             // CS_GRP_JUMP
@@ -443,16 +454,6 @@ impl Analyzer {
                 offset: insn.address(),
                 exit_type,
                 target,
-            }));
-        }
-
-        // Check if it's a call
-        if groups.contains(&InsnGroupId(2)) {
-            // CS_GRP_CALL
-            return Ok(Some(ExitPoint {
-                offset: insn.address(),
-                exit_type: ExitType::Call,
-                target: self.get_jump_target(cs, insn),
             }));
         }
 
