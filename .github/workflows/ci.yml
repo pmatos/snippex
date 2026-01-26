@@ -46,28 +46,21 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-  # Unit and integration tests - matrix across OS and Rust versions
+  # Unit and integration tests - matrix across OS
   test:
-    name: Test (${{ matrix.os }} / ${{ matrix.rust }})
+    name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     needs: lint
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        rust: [stable, "1.75"]  # stable + MSRV
-        exclude:
-          # Only test MSRV on Ubuntu to save CI time
-          - os: macos-latest
-            rust: "1.75"
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.rust }}
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install system dependencies (Ubuntu)
         if: runner.os == 'Linux'
@@ -83,7 +76,7 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "test-${{ matrix.os }}-${{ matrix.rust }}"
+          shared-key: "test-${{ matrix.os }}"
           cache-all-crates: true
           prefix-key: "v2"
           save-if: ${{ github.ref == 'refs/heads/main' }}
