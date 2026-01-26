@@ -1,0 +1,37 @@
+# Auto-fix formatting and clippy issues on PRs
+# Uses autofix.ci to automatically commit fixes
+#
+# Documentation: https://autofix.ci/setup
+
+name: autofix.ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  autofix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "autofix"
+          prefix-key: "v1"
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+
+      - name: Run clippy --fix
+        run: cargo clippy --fix --all-targets --all-features --allow-dirty --allow-staged
+
+      - name: Run cargo fmt
+        run: cargo fmt --all
+
+      - uses: autofix-ci/action@ff86a557419858bb967097bfc916833f5647fa8c
