@@ -314,6 +314,7 @@ fn format_diagnostic_message(
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_check_tool_available() {
@@ -325,24 +326,25 @@ mod tests {
 
     #[test]
     fn test_diagnose_segfault() {
-        let path = PathBuf::from("/tmp/test_binary");
-        let diag = diagnose_execution_failure(&path, Some(-11), "", None);
+        let temp_file = NamedTempFile::new().unwrap();
+        let diag = diagnose_execution_failure(temp_file.path(), Some(-11), "", None);
         assert!(diag.contains("segmentation fault"));
         assert!(diag.contains("invalid memory"));
     }
 
     #[test]
     fn test_diagnose_illegal_instruction() {
-        let path = PathBuf::from("/tmp/test_binary");
-        let diag = diagnose_execution_failure(&path, Some(-4), "illegal instruction", None);
+        let temp_file = NamedTempFile::new().unwrap();
+        let diag =
+            diagnose_execution_failure(temp_file.path(), Some(-4), "illegal instruction", None);
         assert!(diag.contains("illegal instruction"));
         assert!(diag.contains("CPU instructions"));
     }
 
     #[test]
     fn test_diagnose_permission_denied() {
-        let path = PathBuf::from("/tmp/test_binary");
-        let diag = diagnose_execution_failure(&path, Some(1), "Permission denied", None);
+        let temp_file = NamedTempFile::new().unwrap();
+        let diag = diagnose_execution_failure(temp_file.path(), Some(1), "Permission denied", None);
         assert!(diag.contains("execute permissions"));
         assert!(diag.contains("chmod"));
     }

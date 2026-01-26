@@ -20,12 +20,6 @@ pub struct AnalyzeCommand {
     )]
     database: PathBuf,
 
-    #[arg(
-        long,
-        help = "Override host architecture for testing (x86_64 or aarch64)"
-    )]
-    arch: Option<String>,
-
     #[arg(short, long, help = "Show detailed analysis information")]
     verbose: bool,
 

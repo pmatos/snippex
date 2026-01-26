@@ -124,7 +124,7 @@ fn test_cli_simulate_command_basic() {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     // Verify simulate command help contains expected options
-    assert!(stdout.contains("Block number to simulate"));
+    assert!(stdout.contains("Block(s) to simulate"));
     assert!(stdout.contains("--database"));
     assert!(stdout.contains("--runs"));
     assert!(stdout.contains("--seed"));
