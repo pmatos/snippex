@@ -3,6 +3,7 @@ use capstone::prelude::*;
 use object::{Architecture, BinaryFormat, Object, ObjectSection, ObjectSegment, SectionKind};
 use rand::Rng;
 use sha2::{Digest, Sha256};
+use std::cell::OnceCell;
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
@@ -11,7 +12,6 @@ use crate::db::BinaryInfo;
 use crate::error::SnippexError;
 
 const MIN_BLOCK_SIZE: usize = 16;
-const MAX_FILTER_ATTEMPTS: usize = 1000;
 
 /// Instruction categories for filtering
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -158,9 +158,29 @@ impl SupportedFormat {
     }
 }
 
+/// Cached instruction metadata for efficient filtering
+#[derive(Clone)]
+struct InstructionMeta {
+    address: u64,
+    size: usize,
+    has_memory_access: bool,
+    category: InstructionCategory,
+}
+
+/// Cached disassembly data for the .text section
+struct DisassemblyCache {
+    section_addr: u64,
+    section_data: Vec<u8>,
+    instructions: Vec<InstructionMeta>,
+}
+
 pub struct Extractor {
     binary_path: PathBuf,
     binary_data: Vec<u8>,
+    /// Cached binary info to avoid recomputing SHA256 hash on every call
+    cached_binary_info: OnceCell<BinaryInfo>,
+    /// Cached disassembly for efficient filtered extraction
+    cached_disassembly: OnceCell<DisassemblyCache>,
 }
 
 impl Extractor {
@@ -169,6 +189,8 @@ impl Extractor {
         Ok(Extractor {
             binary_path,
             binary_data,
+            cached_binary_info: OnceCell::new(),
+            cached_disassembly: OnceCell::new(),
         })
     }
 
@@ -226,6 +248,19 @@ impl Extractor {
     }
 
     pub fn get_binary_info(&self) -> Result<BinaryInfo> {
+        // Use cached value if available
+        if let Some(info) = self.cached_binary_info.get() {
+            return Ok(info.clone());
+        }
+
+        // Compute and cache
+        let info = self.compute_binary_info()?;
+        // Ignore error if another thread set it first
+        let _ = self.cached_binary_info.set(info.clone());
+        Ok(info)
+    }
+
+    fn compute_binary_info(&self) -> Result<BinaryInfo> {
         let file = object::File::parse(&*self.binary_data)
             .map_err(|e| SnippexError::BinaryParsing(e.to_string()))?;
 
@@ -536,7 +571,7 @@ impl Extractor {
     }
 
     /// Extract a random block that matches the given filter criteria.
-    /// Will attempt up to MAX_FILTER_ATTEMPTS times to find a matching block.
+    /// Uses a "seed and grow" strategy for restrictive filters.
     pub fn extract_filtered_block(&self, filter: &ExtractionFilter) -> Result<(u64, u64, Vec<u8>)> {
         filter.validate()?;
 
@@ -544,20 +579,225 @@ impl Extractor {
             return self.extract_random_aligned_block();
         }
 
-        for _ in 0..MAX_FILTER_ATTEMPTS {
-            let (start_addr, end_addr, assembly_block) = self.extract_random_aligned_block()?;
-            let filter_match = self.check_block_filter(&assembly_block, start_addr, filter)?;
+        // Use seed-and-grow strategy: find matching instruction runs
+        self.extract_filtered_block_growing(filter)
+    }
 
-            if filter_match.matches {
-                return Ok((start_addr, end_addr, assembly_block));
+    /// Get or compute the disassembly cache for the .text section.
+    fn get_disassembly_cache(&self) -> Result<&DisassemblyCache> {
+        if let Some(cache) = self.cached_disassembly.get() {
+            return Ok(cache);
+        }
+
+        // Compute and cache
+        let file = object::File::parse(&*self.binary_data)
+            .map_err(|e| SnippexError::BinaryParsing(e.to_string()))?;
+
+        let text_section = self.find_executable_section(&file)?;
+        let section_data = text_section.data().map_err(|e| {
+            SnippexError::BinaryParsing(format!("Failed to read section data: {e}"))
+        })?;
+        let section_addr = text_section.address();
+
+        let cs = self.create_capstone_with_detail()?;
+
+        // Disassemble the entire section
+        let insns = cs.disasm_all(section_data, section_addr).map_err(|e| {
+            SnippexError::BinaryParsing(format!("Failed to disassemble section: {e}"))
+        })?;
+
+        // Build instruction metadata
+        let instructions: Vec<InstructionMeta> = insns
+            .iter()
+            .map(|insn| {
+                let mnemonic = insn.mnemonic().unwrap_or("");
+                let op_str = insn.op_str().unwrap_or("");
+                InstructionMeta {
+                    address: insn.address(),
+                    size: insn.bytes().len(),
+                    has_memory_access: op_str.contains('['),
+                    category: Self::categorize_instruction(mnemonic),
+                }
+            })
+            .collect();
+
+        let cache = DisassemblyCache {
+            section_addr,
+            section_data: section_data.to_vec(),
+            instructions,
+        };
+
+        // Store in cache (ignore if another thread set it first)
+        let _ = self.cached_disassembly.set(cache);
+        Ok(self.cached_disassembly.get().unwrap())
+    }
+
+    /// Extract a block using the "seed and grow" strategy.
+    /// This is much more efficient for restrictive filters like "no memory, no control flow".
+    ///
+    /// Strategy:
+    /// 1. Disassemble the entire .text section once (cached)
+    /// 2. Classify each instruction (matches filter or not)
+    /// 3. Find all maximal runs of matching instructions
+    /// 4. Filter runs by size constraints
+    /// 5. Randomly select from valid runs
+    fn extract_filtered_block_growing(
+        &self,
+        filter: &ExtractionFilter,
+    ) -> Result<(u64, u64, Vec<u8>)> {
+        let cache = self.get_disassembly_cache()?;
+        let instructions = &cache.instructions;
+
+        if instructions.is_empty() {
+            return Err(SnippexError::InvalidBinary("No instructions in section".into()).into());
+        }
+
+        // Find all maximal runs of instructions that match the filter
+        let mut valid_runs: Vec<(usize, usize)> = Vec::new(); // (start_idx, end_idx exclusive)
+        let mut run_start: Option<usize> = None;
+
+        for (idx, meta) in instructions.iter().enumerate() {
+            let matches = self.instruction_meta_matches_filter(meta, filter);
+
+            if matches {
+                if run_start.is_none() {
+                    run_start = Some(idx);
+                }
+            } else if let Some(start) = run_start {
+                // End of a run
+                valid_runs.push((start, idx));
+                run_start = None;
             }
         }
 
-        Err(anyhow::anyhow!(
-            "Could not find a block matching filter criteria after {} attempts. \
-             Try relaxing the filter constraints.",
-            MAX_FILTER_ATTEMPTS
-        ))
+        // Don't forget the last run if it extends to the end
+        if let Some(start) = run_start {
+            valid_runs.push((start, instructions.len()));
+        }
+
+        // Filter runs by minimum size (runs must be at least min_size to be valid)
+        // Note: max_size is applied later when selecting the final sub-block
+        let min_size = filter.min_size.unwrap_or(MIN_BLOCK_SIZE);
+        let max_size = filter.max_size;
+
+        let valid_runs: Vec<_> = valid_runs
+            .into_iter()
+            .filter(|(start, end)| {
+                // Calculate byte size of this run
+                let start_addr = instructions[*start].address;
+                let end_addr = if *end < instructions.len() {
+                    instructions[*end].address
+                } else {
+                    let last = &instructions[instructions.len() - 1];
+                    last.address + last.size as u64
+                };
+                let size = (end_addr - start_addr) as usize;
+
+                // Run must be at least min_size (larger runs will be trimmed later)
+                size >= min_size
+            })
+            .collect();
+
+        if valid_runs.is_empty() {
+            return Err(anyhow::anyhow!(
+                "No instruction runs matching filter criteria found. \
+                 The filter may be too restrictive for this binary."
+            ));
+        }
+
+        // Randomly select one of the valid runs
+        let mut rng = rand::rng();
+        let (run_start, run_end) = valid_runs[rng.random_range(0..valid_runs.len())];
+
+        // For runs larger than max_size, we need to extract a sub-range
+        let start_addr = instructions[run_start].address;
+        let run_end_addr = if run_end < instructions.len() {
+            instructions[run_end].address
+        } else {
+            let last = &instructions[instructions.len() - 1];
+            last.address + last.size as u64
+        };
+        let run_size = (run_end_addr - start_addr) as usize;
+
+        // If the run is larger than max_size, select a random sub-block
+        let (final_start_idx, final_end_idx) = if let Some(max) = max_size {
+            if run_size > max {
+                // Find a random starting point within the run
+                let available_start_range = run_end - run_start;
+                let start_offset = rng.random_range(0..available_start_range);
+                let new_start = run_start + start_offset;
+                let new_start_addr = instructions[new_start].address;
+
+                // Find the largest end_idx such that block size <= max
+                // Start with at least one instruction
+                let mut best_end = new_start + 1;
+                for candidate_end in (new_start + 1)..=run_end {
+                    let end_addr = if candidate_end < instructions.len() {
+                        instructions[candidate_end].address
+                    } else {
+                        let last = &instructions[instructions.len() - 1];
+                        last.address + last.size as u64
+                    };
+                    let size = (end_addr - new_start_addr) as usize;
+                    if size <= max {
+                        best_end = candidate_end;
+                    } else {
+                        break; // Further candidates will only be larger
+                    }
+                }
+                (new_start, best_end)
+            } else {
+                (run_start, run_end)
+            }
+        } else {
+            (run_start, run_end)
+        };
+
+        // Extract the bytes
+        let final_start_addr = instructions[final_start_idx].address;
+        let final_end_addr = if final_end_idx < instructions.len() {
+            instructions[final_end_idx].address
+        } else {
+            let last = &instructions[instructions.len() - 1];
+            last.address + last.size as u64
+        };
+
+        let start_offset = (final_start_addr - cache.section_addr) as usize;
+        let end_offset = (final_end_addr - cache.section_addr) as usize;
+        let assembly_block = cache.section_data[start_offset..end_offset].to_vec();
+
+        Ok((final_start_addr, final_end_addr, assembly_block))
+    }
+
+    /// Check if instruction metadata matches the filter criteria.
+    fn instruction_meta_matches_filter(
+        &self,
+        meta: &InstructionMeta,
+        filter: &ExtractionFilter,
+    ) -> bool {
+        // Check memory access
+        if let Some(require_mem) = filter.require_memory_access {
+            if require_mem != meta.has_memory_access {
+                return false;
+            }
+        }
+
+        // Check control flow
+        let is_control_flow = meta.category == InstructionCategory::Branch;
+        if let Some(require_cf) = filter.require_control_flow {
+            if require_cf != is_control_flow {
+                return false;
+            }
+        }
+
+        // Check instruction categories (if specified, at least one must match)
+        if let Some(ref required_categories) = filter.instruction_categories {
+            if !required_categories.contains(&meta.category) {
+                return false;
+            }
+        }
+
+        true
     }
 
     /// Check if a block matches the given filter criteria.
@@ -568,6 +808,18 @@ impl Extractor {
         filter: &ExtractionFilter,
     ) -> Result<FilterMatch> {
         let cs = self.create_capstone_with_detail()?;
+        self.check_block_filter_with_capstone(&cs, assembly_block, start_addr, filter)
+    }
+
+    /// Check if a block matches filter criteria using a pre-created Capstone instance.
+    /// This is more efficient when checking multiple blocks.
+    pub fn check_block_filter_with_capstone(
+        &self,
+        cs: &capstone::Capstone,
+        assembly_block: &[u8],
+        start_addr: u64,
+        filter: &ExtractionFilter,
+    ) -> Result<FilterMatch> {
         let insns = cs.disasm_all(assembly_block, start_addr).map_err(|e| {
             SnippexError::BinaryParsing(format!("Failed to disassemble block: {e}"))
         })?;
@@ -822,6 +1074,9 @@ impl Extractor {
     ) -> Result<(usize, usize)> {
         filter.validate()?;
 
+        // Create Capstone instance once and reuse for all filter checks
+        let cs = self.create_capstone_with_detail()?;
+
         let mut matching = 0;
         let mut total = 0;
 
@@ -829,7 +1084,7 @@ impl Extractor {
             if let Ok((start_addr, _, assembly_block)) = self.extract_random_aligned_block() {
                 total += 1;
                 if let Ok(filter_match) =
-                    self.check_block_filter(&assembly_block, start_addr, filter)
+                    self.check_block_filter_with_capstone(&cs, &assembly_block, start_addr, filter)
                 {
                     if filter_match.matches {
                         matching += 1;
