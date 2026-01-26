@@ -356,8 +356,6 @@ impl EmulateCommand {
                                     "{}",
                                     style("Stopping on first failure (--stop-on-failure)").red()
                                 );
-                                total_pass += block_pass;
-                                total_fail += block_fail;
                                 return Err(anyhow!("Emulation mismatch detected"));
                             }
                         }
@@ -373,8 +371,6 @@ impl EmulateCommand {
                         );
 
                         if self.stop_on_failure {
-                            total_pass += block_pass;
-                            total_fail += block_fail;
                             return Err(anyhow!("FEX execution failed: {}", e));
                         }
                     }

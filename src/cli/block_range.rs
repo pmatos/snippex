@@ -91,11 +91,13 @@ impl BlockRange {
     }
 
     /// Returns true if this is a single-block selection.
+    #[allow(dead_code)]
     pub fn is_single(&self) -> bool {
         matches!(self, BlockRange::Single(_))
     }
 
     /// Returns the single block number if this is a single selection.
+    #[allow(dead_code)]
     pub fn as_single(&self) -> Option<usize> {
         match self {
             BlockRange::Single(n) => Some(*n),

@@ -293,7 +293,7 @@ impl AsmTest {
             let mnemonic = insn.mnemonic().unwrap_or("");
             if mnemonic == "syscall" || (mnemonic == "int" && insn.op_str() == Some("0x80")) {
                 // Also include the instructions setting up the syscall
-                end_idx = i.saturating_sub(if self.bits == 64 { 2 } else { 2 }); // mov rax/eax, N; mov rdi/ebx, 0
+                end_idx = i.saturating_sub(2); // Skip setup: mov rax/eax, N; mov rdi/ebx, 0
                 break;
             }
         }
@@ -415,7 +415,7 @@ fn ann_asm() {
 
     let test_filter = args
         .iter()
-        .skip(2)
+        .skip(2) // skip binary name and test name
         .find(|&s| s != "--nocapture")
         .map(|s| s.as_str());
 
