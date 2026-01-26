@@ -28,7 +28,10 @@ pub struct EmulateCommand {
     )]
     pub database: PathBuf,
 
-    #[arg(long, help = "Override host architecture for testing (x86_64 or aarch64)")]
+    #[arg(
+        long,
+        help = "Override host architecture for testing (x86_64 or aarch64)"
+    )]
     pub arch: Option<String>,
 
     #[arg(long, help = "Only emulate specific simulation by ID")]

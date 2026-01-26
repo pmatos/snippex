@@ -153,7 +153,7 @@ impl AsmTest {
             }
 
             let parts: Vec<&str> = item.split_whitespace().collect();
-            if parts.len() >= 1 {
+            if !parts.is_empty() {
                 let access_type = parts[0].to_uppercase();
                 let register = if parts.len() > 1 {
                     Some(parts[1].to_lowercase())
@@ -207,7 +207,7 @@ impl AsmTest {
 
     fn assemble_and_extract(&self) -> Result<(u64, u64, Vec<u8>)> {
         // Check if NASM is available
-        if !Command::new("nasm").arg("--version").output().is_ok() {
+        if Command::new("nasm").arg("--version").output().is_err() {
             return Err(anyhow!(
                 "NASM is not available. Please install NASM to run assembly tests."
             ));
@@ -216,7 +216,7 @@ impl AsmTest {
         let temp_dir = TempDir::new()?;
         let asm_file = temp_dir.path().join(format!("{}.asm", self.name));
         let obj_file = temp_dir.path().join(format!("{}.o", self.name));
-        let elf_file = temp_dir.path().join(format!("{}", self.name));
+        let elf_file = temp_dir.path().join(self.name.to_string());
 
         // Write NASM source
         let nasm_content = self.create_nasm_file()?;
@@ -415,9 +415,8 @@ fn ann_asm() {
 
     let test_filter = args
         .iter()
-        .skip(2) // skip binary name and test name
-        .filter(|&s| s != "--nocapture")
-        .next()
+        .skip(2)
+        .find(|&s| s != "--nocapture")
         .map(|s| s.as_str());
 
     let test_files = find_asm_test_files();
@@ -440,7 +439,7 @@ fn ann_asm() {
         if let Some(test_file) = test_files.iter().find(|f| {
             f.file_name()
                 .and_then(|n| n.to_str())
-                .map_or(false, |name| name == test_name)
+                .is_some_and(|name| name == test_name)
         }) {
             tests_to_run.push(test_file.clone());
         } else {
@@ -468,7 +467,7 @@ fn ann_asm() {
             .and_then(|s| s.to_str())
             .unwrap_or("unknown");
 
-        match AsmTest::parse_from_file(&test_file) {
+        match AsmTest::parse_from_file(test_file) {
             Ok(test) => match test.run_test() {
                 Ok(_) => {
                     println!("✓ Assembly test '{}' passed", test_name);

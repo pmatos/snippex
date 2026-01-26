@@ -7,8 +7,8 @@
 //!   - `snippex validate 1,5,10` (specific blocks)
 
 use anyhow::{anyhow, Result};
-use console::style;
 use clap::Args;
+use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use serde::Serialize;

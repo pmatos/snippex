@@ -20,7 +20,10 @@ pub struct AnalyzeCommand {
     )]
     database: PathBuf,
 
-    #[arg(long, help = "Override host architecture for testing (x86_64 or aarch64)")]
+    #[arg(
+        long,
+        help = "Override host architecture for testing (x86_64 or aarch64)"
+    )]
     arch: Option<String>,
 
     #[arg(short, long, help = "Show detailed analysis information")]
@@ -123,7 +126,10 @@ impl AnalyzeCommand {
         if multiple {
             println!();
             println!("{}", "═".repeat(60));
-            println!("Summary: {} succeeded, {} failed", success_count, error_count);
+            println!(
+                "Summary: {} succeeded, {} failed",
+                success_count, error_count
+            );
         }
 
         if error_count > 0 && success_count == 0 {

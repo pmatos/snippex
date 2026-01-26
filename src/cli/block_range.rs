@@ -36,11 +36,7 @@ impl BlockRange {
         let blocks = match self {
             BlockRange::Single(n) => {
                 if *n == 0 || *n > total {
-                    return Err(anyhow!(
-                        "Block {} is out of range (valid: 1-{})",
-                        n,
-                        total
-                    ));
+                    return Err(anyhow!("Block {} is out of range (valid: 1-{})", n, total));
                 }
                 vec![*n]
             }
@@ -63,11 +59,7 @@ impl BlockRange {
                     ));
                 }
                 if *start > *end {
-                    return Err(anyhow!(
-                        "Invalid range: start ({}) > end ({})",
-                        start,
-                        end
-                    ));
+                    return Err(anyhow!("Invalid range: start ({}) > end ({})", start, end));
                 }
                 (*start..=*end).collect()
             }
@@ -87,11 +79,7 @@ impl BlockRange {
             BlockRange::List(items) => {
                 for &n in items {
                     if n == 0 || n > total {
-                        return Err(anyhow!(
-                            "Block {} is out of range (valid: 1-{})",
-                            n,
-                            total
-                        ));
+                        return Err(anyhow!("Block {} is out of range (valid: 1-{})", n, total));
                     }
                 }
                 items.clone()
@@ -203,7 +191,10 @@ mod tests {
     fn test_parse_single() {
         assert_eq!("5".parse::<BlockRange>().unwrap(), BlockRange::Single(5));
         assert_eq!("1".parse::<BlockRange>().unwrap(), BlockRange::Single(1));
-        assert_eq!("100".parse::<BlockRange>().unwrap(), BlockRange::Single(100));
+        assert_eq!(
+            "100".parse::<BlockRange>().unwrap(),
+            BlockRange::Single(100)
+        );
     }
 
     #[test]

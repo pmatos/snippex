@@ -22,10 +22,18 @@ pub struct SimulateCommand {
     )]
     pub database: PathBuf,
 
-    #[arg(long, help = "Override host architecture for testing (x86_64 or aarch64)")]
+    #[arg(
+        long,
+        help = "Override host architecture for testing (x86_64 or aarch64)"
+    )]
     pub arch: Option<String>,
 
-    #[arg(short, long, default_value = "1", help = "Number of simulation runs per block")]
+    #[arg(
+        short,
+        long,
+        default_value = "1",
+        help = "Number of simulation runs per block"
+    )]
     pub runs: usize,
 
     #[arg(short, long, help = "Seed for random value generation")]
@@ -155,7 +163,10 @@ impl SimulateCommand {
                     continue;
                 }
                 Err(e) => {
-                    eprintln!("✗ Failed to load analysis for block #{}: {}", block_number, e);
+                    eprintln!(
+                        "✗ Failed to load analysis for block #{}: {}",
+                        block_number, e
+                    );
                     total_failure += 1;
                     if self.stop_on_failure {
                         break;
@@ -165,7 +176,12 @@ impl SimulateCommand {
             };
 
             if multiple_blocks {
-                println!("Block #{} ({}/{})", block_number, block_idx + 1, block_numbers.len());
+                println!(
+                    "Block #{} ({}/{})",
+                    block_number,
+                    block_idx + 1,
+                    block_numbers.len()
+                );
             } else {
                 println!("Simulating block #{}...", block_number);
             }
@@ -242,7 +258,10 @@ impl SimulateCommand {
 
             if self.runs > 1 {
                 println!();
-                println!("  Block #{}: {} succeeded, {} failed", block_number, block_success, block_failure);
+                println!(
+                    "  Block #{}: {} succeeded, {} failed",
+                    block_number, block_success, block_failure
+                );
             }
 
             if self.stop_on_failure && block_failure > 0 {
@@ -320,10 +339,7 @@ impl SimulateCommand {
                 .load_block_analysis(extraction.id)?
                 .ok_or_else(|| anyhow!("Block analysis not found in database"))?;
 
-            println!(
-                "Preparing remote simulation for block #{}...",
-                block_number
-            );
+            println!("Preparing remote simulation for block #{}...", block_number);
             println!("  Binary: {}", extraction.binary_path);
             println!(
                 "  Address range: 0x{:08x} - 0x{:08x}",
@@ -337,7 +353,8 @@ impl SimulateCommand {
 
                 let mut random_gen = crate::simulator::RandomStateGenerator::new();
                 if let Some(seed) = self.seed {
-                    random_gen = crate::simulator::RandomStateGenerator::with_seed(seed + run as u64);
+                    random_gen =
+                        crate::simulator::RandomStateGenerator::with_seed(seed + run as u64);
                 }
                 let initial_state = random_gen.generate_initial_state(&analysis);
 

@@ -767,7 +767,7 @@ mod tests {
         assert_eq!(sig, sig2);
 
         // Different differences should produce different signature
-        let sig3 = generate_issue_signature(&extraction, &vec!["rbx mismatch".to_string()]);
+        let sig3 = generate_issue_signature(&extraction, &["rbx mismatch".to_string()]);
         assert_ne!(sig, sig3);
     }
 
