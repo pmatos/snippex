@@ -1,0 +1,9 @@
+# Cargo audit configuration
+# https://rustsec.org/
+
+[advisories]
+# Ignore the RSA Marvin Attack advisory - no fix available
+# This is a transitive dependency through octocrab -> jsonwebtoken -> rsa
+# The timing sidechannel attack requires specific conditions that don't apply
+# to our use case (GitHub API authentication)
+ignore = ["RUSTSEC-2023-0071"]
