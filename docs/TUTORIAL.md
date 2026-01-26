@@ -480,17 +480,44 @@ snippex export -o session_results.json --simulated-only
 
 ## Reference
 
+### Block Range Syntax
+
+Commands that operate on blocks (`analyze`, `simulate`, `emulate`) accept flexible block specifications:
+
+| Format | Example | Description |
+|--------|---------|-------------|
+| Single | `5` | Block number 5 |
+| Range | `1-10` | Blocks 1 through 10 (inclusive) |
+| Open-ended | `5-` | Blocks 5 to the last block |
+| List | `3,7,12` | Specific blocks 3, 7, and 12 |
+| All | `all` | All blocks in the database |
+
+Examples:
+```bash
+# Analyze blocks 1-10
+snippex analyze 1-10
+
+# Simulate all blocks with 5 runs each
+snippex simulate all --runs 5
+
+# Emulate specific blocks
+snippex emulate 3,7,12
+
+# Simulate from block 50 onwards
+snippex simulate 50-
+```
+
 ### Commands
 
 | Command | Description |
 |---------|-------------|
 | `extract` | Extract assembly blocks from binary |
 | `list` | List extracted blocks |
-| `analyze` | Disassemble and analyze a block |
+| `analyze` | Disassemble and analyze block(s) |
 | `simulate` | Run native simulation (ground truth) |
 | `emulate` | Replay stored simulations through FEX-Emu and compare |
 | `validate` | Compare native vs FEX-Emu (same machine) |
-| `validate-batch` | Batch validation |
+| `validate-batch` | Batch validation (**deprecated** - use `validate` with range syntax) |
 | `export` | Export blocks to JSON |
 | `import-results` | Import simulation results |
 | `stats` | View validation statistics |

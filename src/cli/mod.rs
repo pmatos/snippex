@@ -1,4 +1,5 @@
 pub mod analyze;
+pub mod block_range;
 pub mod cache;
 pub mod compare;
 pub mod completions;

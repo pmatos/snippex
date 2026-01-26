@@ -3,6 +3,7 @@ use clap::Args;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use crate::cli::block_range::BlockRange;
 use crate::config::Config;
 use crate::db::Database;
 use crate::remote::{ExecutionPackage, RemoteOrchestrator};
@@ -10,8 +11,8 @@ use crate::simulator::{EmulatorConfig, Simulator};
 
 #[derive(Args)]
 pub struct SimulateCommand {
-    #[arg(help = "Block number to simulate (as shown by list command)")]
-    pub block_number: usize,
+    #[arg(help = "Block(s) to simulate: 5, 1-10, 5-, 3,7,12, or all")]
+    pub blocks: BlockRange,
 
     #[arg(
         short,
@@ -21,7 +22,10 @@ pub struct SimulateCommand {
     )]
     pub database: PathBuf,
 
-    #[arg(short, long, default_value = "1", help = "Number of simulation runs")]
+    #[arg(long, help = "Override host architecture for testing (x86_64 or aarch64)")]
+    pub arch: Option<String>,
+
+    #[arg(short, long, default_value = "1", help = "Number of simulation runs per block")]
     pub runs: usize,
 
     #[arg(short, long, help = "Seed for random value generation")]
@@ -42,11 +46,13 @@ pub struct SimulateCommand {
 
     #[arg(long, help = "Execute on remote machine (name from config)")]
     pub remote: Option<String>,
+
+    #[arg(long, help = "Stop on first simulation failure")]
+    pub stop_on_failure: bool,
 }
 
 impl SimulateCommand {
     pub fn execute(self) -> Result<()> {
-        // Check if database exists
         if !self.database.exists() {
             return Err(anyhow!(
                 "Database not found at '{}'\n\n\
@@ -54,7 +60,7 @@ impl SimulateCommand {
                  • Extract blocks first: snippex extract <binary>\n\
                  • Specify a different database: snippex simulate {} -d <path>",
                 self.database.display(),
-                self.block_number
+                self.blocks
             ));
         }
 
@@ -65,7 +71,6 @@ impl SimulateCommand {
 
         let mut db = Database::new(&self.database)?;
 
-        // Get the extraction to simulate
         let extractions = match db.list_extractions() {
             Ok(extractions) => extractions,
             Err(_) => {
@@ -78,42 +83,10 @@ impl SimulateCommand {
             }
         };
 
-        if self.block_number == 0 || self.block_number > extractions.len() {
-            return Err(anyhow!(
-                "Invalid block number: {}\n\n\
-                 Valid block range: 1-{}\n\n\
-                 Suggestions:\n\
-                 • List available blocks: snippex list",
-                self.block_number,
-                extractions.len()
-            ));
-        }
+        let block_numbers = self.blocks.resolve(extractions.len())?;
+        let multiple_blocks = block_numbers.len() > 1;
 
-        let extraction = &extractions[self.block_number - 1];
-
-        // Check if block is analyzed
-        if extraction.analysis_status != "analyzed" {
-            return Err(anyhow!(
-                "Block #{} is not analyzed\n\n\
-                 Suggestions:\n\
-                 • Analyze this block: snippex analyze {}",
-                self.block_number,
-                self.block_number
-            ));
-        }
-
-        // Load the full analysis from the database
-        println!("Loading block analysis...");
-
-        // Get extraction ID from database
-        let extraction_id = self.get_extraction_id(&db, extraction)?;
-
-        // Load actual analysis from database
-        let analysis = db
-            .load_block_analysis(extraction_id)?
-            .ok_or_else(|| anyhow!("Block analysis not found in database"))?;
-
-        // Parse emulator configuration
+        // Parse emulator configuration once
         let emulator_config = if let Some(emulator_str) = &self.emulator {
             let config = EmulatorConfig::from_str(emulator_str)
                 .map_err(|e| anyhow!("Invalid emulator configuration: {}", e))?;
@@ -126,10 +99,9 @@ impl SimulateCommand {
                      • fex-emu - FEX-Emu x86 emulator (requires FEXInterpreter)\n\
                      • qemu-x86_64 - QEMU user-mode emulation\n\n\
                      Suggestions:\n\
-                     • Use native: snippex simulate {} --emulator native\n\
-                     • Install the required emulator",
+                     • Use native: snippex simulate {} --emulator native",
                     emulator_str,
-                    self.block_number
+                    self.blocks
                 ));
             }
 
@@ -138,104 +110,167 @@ impl SimulateCommand {
             None
         };
 
-        println!("Simulating block #{}...", self.block_number);
-        println!("  Binary: {}", extraction.binary_path);
-        println!(
-            "  Address range: 0x{:08x} - 0x{:08x}",
-            extraction.start_address, extraction.end_address
-        );
-        println!("  Runs: {}", self.runs);
-        if let Some(seed) = self.seed {
-            println!("  Seed: {seed}");
-        }
-        if let Some(ref emulator) = self.emulator {
-            println!("  Emulator: {emulator}");
-        }
-        println!();
-
-        // Initialize simulator
+        // Initialize simulator once
         let mut simulator = Simulator::new()?;
-
-        // Set seed if provided
         if let Some(seed) = self.seed {
             simulator.random_generator = crate::simulator::RandomStateGenerator::with_seed(seed);
         }
 
-        // Use the actual analysis loaded from database
+        let mut total_success = 0;
+        let mut total_failure = 0;
 
-        // Run simulations
-        for run in 1..=self.runs {
-            if self.runs > 1 {
-                println!("Run {}/{}:", run, self.runs);
+        for (block_idx, block_number) in block_numbers.iter().enumerate() {
+            if multiple_blocks && block_idx > 0 {
+                println!();
+                println!("{}", "─".repeat(60));
+                println!();
             }
 
-            match simulator.simulate_block(
-                extraction,
-                &analysis,
-                emulator_config.clone(),
-                self.keep_files,
-            ) {
-                Ok(result) => {
-                    println!("  ✓ Simulation completed successfully");
-                    println!("    Execution time: {:?}", result.execution_time);
-                    println!("    Exit code: {}", result.exit_code);
+            let extraction = &extractions[block_number - 1];
 
-                    if self.verbose {
-                        println!("    Simulation ID: {}", result.simulation_id);
-                        println!(
-                            "    Initial registers: {}",
-                            result.initial_state.registers.len()
-                        );
-                        println!(
-                            "    Final registers: {}",
-                            result.final_state.registers.len()
-                        );
+            // Check if block is analyzed
+            if extraction.analysis_status != "analyzed" {
+                eprintln!(
+                    "✗ Block #{} is not analyzed. Run 'snippex analyze {}' first.",
+                    block_number, block_number
+                );
+                total_failure += 1;
+                if self.stop_on_failure {
+                    break;
+                }
+                continue;
+            }
 
-                        if let Some(ref asm_path) = result.assembly_file_path {
-                            println!("    Assembly file: {asm_path}");
-                        }
-                        if let Some(ref bin_path) = result.binary_file_path {
-                            println!("    Binary file: {bin_path}");
-                        }
+            let extraction_id = extraction.id;
+
+            // Load analysis from database
+            let analysis = match db.load_block_analysis(extraction_id) {
+                Ok(Some(a)) => a,
+                Ok(None) => {
+                    eprintln!("✗ Block #{} analysis not found in database", block_number);
+                    total_failure += 1;
+                    if self.stop_on_failure {
+                        break;
                     }
-
-                    // Store simulation result in database
-                    if let Err(e) = db.store_simulation_result(extraction_id, &result) {
-                        eprintln!("Warning: Failed to store simulation result: {e}");
-                    }
+                    continue;
                 }
                 Err(e) => {
-                    println!("  ✗ Simulation failed: {e}");
-                    if self.runs > 1 {
-                        continue;
-                    } else {
-                        return Err(e.into());
+                    eprintln!("✗ Failed to load analysis for block #{}: {}", block_number, e);
+                    total_failure += 1;
+                    if self.stop_on_failure {
+                        break;
+                    }
+                    continue;
+                }
+            };
+
+            if multiple_blocks {
+                println!("Block #{} ({}/{})", block_number, block_idx + 1, block_numbers.len());
+            } else {
+                println!("Simulating block #{}...", block_number);
+            }
+            println!("  Binary: {}", extraction.binary_path);
+            println!(
+                "  Address range: 0x{:08x} - 0x{:08x}",
+                extraction.start_address, extraction.end_address
+            );
+            println!("  Runs: {}", self.runs);
+            if let Some(seed) = self.seed {
+                println!("  Seed: {seed}");
+            }
+            if let Some(ref emulator) = self.emulator {
+                println!("  Emulator: {emulator}");
+            }
+            println!();
+
+            let mut block_success = 0;
+            let mut block_failure = 0;
+
+            for run in 1..=self.runs {
+                if self.runs > 1 {
+                    println!("  Run {}/{}:", run, self.runs);
+                }
+
+                match simulator.simulate_block(
+                    extraction,
+                    &analysis,
+                    emulator_config.clone(),
+                    self.keep_files,
+                ) {
+                    Ok(result) => {
+                        println!("    ✓ Simulation completed");
+                        println!("      Execution time: {:?}", result.execution_time);
+                        println!("      Exit code: {}", result.exit_code);
+
+                        if self.verbose {
+                            println!("      Simulation ID: {}", result.simulation_id);
+                            println!(
+                                "      Initial registers: {}",
+                                result.initial_state.registers.len()
+                            );
+                            println!(
+                                "      Final registers: {}",
+                                result.final_state.registers.len()
+                            );
+
+                            if let Some(ref asm_path) = result.assembly_file_path {
+                                println!("      Assembly file: {asm_path}");
+                            }
+                            if let Some(ref bin_path) = result.binary_file_path {
+                                println!("      Binary file: {bin_path}");
+                            }
+                        }
+
+                        if let Err(e) = db.store_simulation_result(extraction_id, &result) {
+                            eprintln!("    Warning: Failed to store simulation result: {e}");
+                        }
+
+                        block_success += 1;
+                    }
+                    Err(e) => {
+                        println!("    ✗ Simulation failed: {e}");
+                        block_failure += 1;
+                        if self.stop_on_failure {
+                            break;
+                        }
                     }
                 }
             }
+
+            total_success += block_success;
+            total_failure += block_failure;
 
             if self.runs > 1 {
                 println!();
+                println!("  Block #{}: {} succeeded, {} failed", block_number, block_success, block_failure);
+            }
+
+            if self.stop_on_failure && block_failure > 0 {
+                break;
             }
         }
 
-        println!("✓ All simulations completed");
-        Ok(())
-    }
+        println!();
+        if multiple_blocks || self.runs > 1 {
+            println!("{}", "═".repeat(60));
+            println!(
+                "Total: {} simulations succeeded, {} failed",
+                total_success, total_failure
+            );
+        } else {
+            println!("✓ Simulation completed");
+        }
 
-    fn get_extraction_id(
-        &self,
-        _db: &Database,
-        extraction: &crate::db::ExtractionInfo,
-    ) -> Result<i64> {
-        Ok(extraction.id)
+        if total_failure > 0 && total_success == 0 {
+            Err(anyhow!("All simulations failed"))
+        } else {
+            Ok(())
+        }
     }
 
     fn execute_remote(&self, remote_name: &str) -> Result<()> {
-        // Load configuration
         let config = Config::load().map_err(|e| anyhow!("Failed to load config: {}", e))?;
 
-        // Get remote configuration
         let remote_config = config
             .get_remote(remote_name)
             .ok_or_else(|| anyhow!("Remote '{}' not found in configuration", remote_name))?
@@ -246,32 +281,10 @@ impl SimulateCommand {
             remote_config.user, remote_config.host
         );
 
-        // Load extraction from database
         let mut db = Database::new(&self.database)?;
         let extractions = db.list_extractions()?;
 
-        if self.block_number == 0 || self.block_number > extractions.len() {
-            return Err(anyhow!(
-                "Invalid block number. Valid range: 1-{}",
-                extractions.len()
-            ));
-        }
-
-        let extraction = &extractions[self.block_number - 1];
-
-        // Check if block is analyzed
-        if extraction.analysis_status != "analyzed" {
-            return Err(anyhow!(
-                "Block #{} is not analyzed. Run 'analyze {}' first.",
-                self.block_number,
-                self.block_number
-            ));
-        }
-
-        // Load analysis
-        let analysis = db
-            .load_block_analysis(extraction.id)?
-            .ok_or_else(|| anyhow!("Block analysis not found in database"))?;
+        let block_numbers = self.blocks.resolve(extractions.len())?;
 
         // Parse emulator configuration
         let emulator_config = if let Some(emulator_str) = &self.emulator {
@@ -283,63 +296,109 @@ impl SimulateCommand {
             None
         };
 
-        println!(
-            "Preparing remote simulation for block #{}...",
-            self.block_number
-        );
-        println!("  Binary: {}", extraction.binary_path);
-        println!(
-            "  Address range: 0x{:08x} - 0x{:08x}",
-            extraction.start_address, extraction.end_address
-        );
-
-        // Generate initial state
-        let mut random_gen = crate::simulator::RandomStateGenerator::new();
-        if let Some(seed) = self.seed {
-            random_gen = crate::simulator::RandomStateGenerator::with_seed(seed);
-        }
-        let initial_state = random_gen.generate_initial_state(&analysis);
-
-        // Create execution package
-        let package = ExecutionPackage::new(
-            extraction,
-            &analysis,
-            &initial_state,
-            emulator_config.as_ref(),
-        );
-
-        // Create orchestrator and execute remotely
         let orchestrator = RemoteOrchestrator::new(remote_config);
 
-        println!("Executing simulation remotely...");
-        let result = orchestrator
-            .execute_remote_simulation(&package)
-            .map_err(|e| anyhow!("Remote execution failed: {}", e))?;
+        let mut total_success = 0;
+        let mut total_failure = 0;
 
-        // Display results
+        for block_number in &block_numbers {
+            let extraction = &extractions[block_number - 1];
+
+            if extraction.analysis_status != "analyzed" {
+                eprintln!(
+                    "✗ Block #{} is not analyzed. Run 'analyze {}' first.",
+                    block_number, block_number
+                );
+                total_failure += 1;
+                if self.stop_on_failure {
+                    break;
+                }
+                continue;
+            }
+
+            let analysis = db
+                .load_block_analysis(extraction.id)?
+                .ok_or_else(|| anyhow!("Block analysis not found in database"))?;
+
+            println!(
+                "Preparing remote simulation for block #{}...",
+                block_number
+            );
+            println!("  Binary: {}", extraction.binary_path);
+            println!(
+                "  Address range: 0x{:08x} - 0x{:08x}",
+                extraction.start_address, extraction.end_address
+            );
+
+            for run in 1..=self.runs {
+                if self.runs > 1 {
+                    println!("  Run {}/{}:", run, self.runs);
+                }
+
+                let mut random_gen = crate::simulator::RandomStateGenerator::new();
+                if let Some(seed) = self.seed {
+                    random_gen = crate::simulator::RandomStateGenerator::with_seed(seed + run as u64);
+                }
+                let initial_state = random_gen.generate_initial_state(&analysis);
+
+                let package = ExecutionPackage::new(
+                    extraction,
+                    &analysis,
+                    &initial_state,
+                    emulator_config.as_ref(),
+                );
+
+                println!("    Executing simulation remotely...");
+                match orchestrator.execute_remote_simulation(&package) {
+                    Ok(result) => {
+                        println!("    ✓ Remote simulation completed");
+                        println!("      Execution time: {:?}", result.execution_time);
+                        println!("      Exit code: {}", result.exit_code);
+
+                        if self.verbose {
+                            println!("      Simulation ID: {}", result.simulation_id);
+                            println!(
+                                "      Initial registers: {}",
+                                result.initial_state.registers.len()
+                            );
+                            println!(
+                                "      Final registers: {}",
+                                result.final_state.registers.len()
+                            );
+                        }
+
+                        if let Err(e) = db.store_simulation_result(extraction.id, &result) {
+                            eprintln!("    Warning: Failed to store simulation result: {e}");
+                        }
+
+                        total_success += 1;
+                    }
+                    Err(e) => {
+                        eprintln!("    ✗ Remote execution failed: {}", e);
+                        total_failure += 1;
+                        if self.stop_on_failure {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if self.stop_on_failure && total_failure > 0 {
+                break;
+            }
+        }
+
         println!();
-        println!("  ✓ Remote simulation completed successfully");
-        println!("    Execution time: {:?}", result.execution_time);
-        println!("    Exit code: {}", result.exit_code);
+        println!("{}", "═".repeat(60));
+        println!(
+            "Total: {} remote simulations succeeded, {} failed",
+            total_success, total_failure
+        );
 
-        if self.verbose {
-            println!("    Simulation ID: {}", result.simulation_id);
-            println!(
-                "    Initial registers: {}",
-                result.initial_state.registers.len()
-            );
-            println!(
-                "    Final registers: {}",
-                result.final_state.registers.len()
-            );
+        if total_failure > 0 && total_success == 0 {
+            Err(anyhow!("All remote simulations failed"))
+        } else {
+            Ok(())
         }
-
-        // Store result in database
-        if let Err(e) = db.store_simulation_result(extraction.id, &result) {
-            eprintln!("Warning: Failed to store simulation result: {e}");
-        }
-
-        println!("✓ Remote simulation completed");
-        Ok(())
     }
 }

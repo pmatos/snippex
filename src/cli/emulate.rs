@@ -11,13 +11,14 @@ use clap::Args;
 use console::style;
 use std::path::PathBuf;
 
+use crate::cli::block_range::BlockRange;
 use crate::db::Database;
 use crate::simulator::{EmulatorConfig, FinalState, SimulationResult, Simulator};
 
 #[derive(Args)]
 pub struct EmulateCommand {
-    #[arg(help = "Block number to emulate (as shown by list command)")]
-    pub block_number: usize,
+    #[arg(help = "Block(s) to emulate: 5, 1-10, 5-, 3,7,12, or all")]
+    pub blocks: BlockRange,
 
     #[arg(
         short,
@@ -26,6 +27,9 @@ pub struct EmulateCommand {
         help = "SQLite database path"
     )]
     pub database: PathBuf,
+
+    #[arg(long, help = "Override host architecture for testing (x86_64 or aarch64)")]
+    pub arch: Option<String>,
 
     #[arg(long, help = "Only emulate specific simulation by ID")]
     pub simulation_id: Option<String>,
@@ -117,95 +121,8 @@ impl EmulateCommand {
                  • Import native results first: snippex import-results <file.json>\n\
                  • Specify a different database: snippex emulate {} -d <path>",
                 self.database.display(),
-                self.block_number
+                self.blocks
             ));
-        }
-
-        let db = Database::new(&self.database)?;
-
-        // Get the extraction
-        let extractions = db.list_extractions()?;
-        if self.block_number == 0 || self.block_number > extractions.len() {
-            return Err(anyhow!(
-                "Invalid block number: {}\n\n\
-                 Valid block range: 1-{}\n\n\
-                 Suggestions:\n\
-                 • List available blocks: snippex list",
-                self.block_number,
-                extractions.len()
-            ));
-        }
-
-        let extraction = &extractions[self.block_number - 1];
-
-        // Check if block is analyzed
-        if extraction.analysis_status != "analyzed" {
-            return Err(anyhow!(
-                "Block #{} is not analyzed\n\n\
-                 Suggestions:\n\
-                 • Analyze this block: snippex analyze {}",
-                self.block_number,
-                self.block_number
-            ));
-        }
-
-        // Load analysis
-        let analysis = db
-            .load_block_analysis(extraction.id)?
-            .ok_or_else(|| anyhow!("Block analysis not found in database"))?;
-
-        // Load stored native simulations
-        let simulations = db.get_simulations_for_extraction(extraction.id)?;
-
-        if simulations.is_empty() {
-            return Err(anyhow!(
-                "No native simulations found for block #{}\n\n\
-                 The emulate command requires native simulation results as ground truth.\n\n\
-                 Workflow:\n\
-                 1. On x86 machine: snippex simulate {} --runs N\n\
-                 2. On x86 machine: snippex export -o results.json\n\
-                 3. On ARM64 machine: snippex import-results results.json\n\
-                 4. On ARM64 machine: snippex emulate {}",
-                self.block_number,
-                self.block_number,
-                self.block_number
-            ));
-        }
-
-        // Filter to native simulations only (no emulator used)
-        let native_simulations: Vec<_> = simulations
-            .iter()
-            .filter(|s| s.emulator_used.is_none())
-            .collect();
-
-        if native_simulations.is_empty() {
-            return Err(anyhow!(
-                "No native (non-emulated) simulations found for block #{}\n\n\
-                 Found {} simulations, but all were run through emulators.\n\
-                 Native x86 execution is required as ground truth.",
-                self.block_number,
-                simulations.len()
-            ));
-        }
-
-        // Filter by simulation ID if specified
-        let simulations_to_run: Vec<_> = if let Some(ref target_id) = self.simulation_id {
-            native_simulations
-                .into_iter()
-                .filter(|s| s.simulation_id == *target_id)
-                .collect()
-        } else {
-            native_simulations
-        };
-
-        if simulations_to_run.is_empty() {
-            if let Some(ref target_id) = self.simulation_id {
-                return Err(anyhow!(
-                    "Simulation '{}' not found for block #{}",
-                    target_id,
-                    self.block_number
-                ));
-            }
         }
 
         // Check FEX-Emu availability
@@ -220,111 +137,285 @@ impl EmulateCommand {
             ));
         }
 
-        println!(
-            "{}",
-            style(format!("Emulating block #{}", self.block_number))
-                .bold()
-                .cyan()
-        );
-        println!("  Binary: {}", style(&extraction.binary_path).dim());
-        println!(
-            "  Range:  {} - {}",
-            style(format!("0x{:08x}", extraction.start_address)).yellow(),
-            style(format!("0x{:08x}", extraction.end_address)).yellow()
-        );
-        println!(
-            "  Native simulations to replay: {}",
-            simulations_to_run.len()
-        );
-        println!();
+        let db = Database::new(&self.database)?;
+        let extractions = db.list_extractions()?;
 
-        // Initialize simulator
+        let block_numbers = self.blocks.resolve(extractions.len())?;
+        let multiple_blocks = block_numbers.len() > 1;
+
+        // Initialize simulator once
         let mut simulator = Simulator::new()?;
 
-        let mut pass_count = 0;
-        let mut fail_count = 0;
+        let mut total_pass = 0;
+        let mut total_fail = 0;
+        let mut blocks_with_no_simulations = 0;
 
-        for (i, native_sim) in simulations_to_run.iter().enumerate() {
-            let sim_num = i + 1;
-            let total = simulations_to_run.len();
-
-            if self.verbose {
-                println!(
-                    "  [{}/{}] Replaying simulation {}...",
-                    sim_num, total, &native_sim.simulation_id[..8]
-                );
+        for (block_idx, block_number) in block_numbers.iter().enumerate() {
+            if multiple_blocks && block_idx > 0 {
+                println!();
+                println!("{}", style("═".repeat(60)).dim());
+                println!();
             }
 
-            // Run through FEX-Emu with the same initial state
-            let fex_result = simulator.simulate_block_with_state(
-                extraction,
-                &analysis,
-                &native_sim.initial_state,
-                Some(fex_config.clone()),
-                self.keep_files,
-            );
+            let extraction = &extractions[block_number - 1];
 
-            match fex_result {
-                Ok(fex_sim) => {
-                    // Compare FEX result against native oracle
-                    let comparison = EmulationComparison::compare(
-                        &native_sim.simulation_id,
-                        &native_sim.final_state,
-                        &fex_sim.final_state,
-                        native_sim.exit_code,
-                        fex_sim.exit_code,
+            // Check if block is analyzed
+            if extraction.analysis_status != "analyzed" {
+                eprintln!(
+                    "{} Block #{} is not analyzed. Run 'snippex analyze {}' first.",
+                    style("✗").red(),
+                    block_number,
+                    block_number
+                );
+                total_fail += 1;
+                if self.stop_on_failure {
+                    break;
+                }
+                continue;
+            }
+
+            // Load analysis
+            let analysis = match db.load_block_analysis(extraction.id) {
+                Ok(Some(a)) => a,
+                Ok(None) => {
+                    eprintln!(
+                        "{} Block #{} analysis not found in database",
+                        style("✗").red(),
+                        block_number
                     );
-
-                    if comparison.is_pass() {
-                        pass_count += 1;
-                        if self.verbose {
-                            println!("    {} PASS", style("✓").green());
-                        }
-                    } else {
-                        fail_count += 1;
-                        self.print_failure(&comparison, native_sim, &fex_sim);
-
-                        if self.stop_on_failure {
-                            println!();
-                            println!(
-                                "{}",
-                                style("Stopping on first failure (--stop-on-failure)").red()
-                            );
-                            break;
-                        }
+                    total_fail += 1;
+                    if self.stop_on_failure {
+                        break;
                     }
+                    continue;
                 }
                 Err(e) => {
-                    fail_count += 1;
-                    println!(
-                        "  [{}/{}] {} FEX execution failed: {}",
-                        sim_num,
-                        total,
+                    eprintln!(
+                        "{} Failed to load analysis for block #{}: {}",
                         style("✗").red(),
+                        block_number,
                         e
                     );
-
+                    total_fail += 1;
                     if self.stop_on_failure {
-                        return Err(anyhow!("FEX execution failed: {}", e));
+                        break;
+                    }
+                    continue;
+                }
+            };
+
+            // Load stored native simulations
+            let simulations = match db.get_simulations_for_extraction(extraction.id) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!(
+                        "{} Failed to load simulations for block #{}: {}",
+                        style("✗").red(),
+                        block_number,
+                        e
+                    );
+                    total_fail += 1;
+                    if self.stop_on_failure {
+                        break;
+                    }
+                    continue;
+                }
+            };
+
+            // Filter to native simulations only (no emulator used)
+            let native_simulations: Vec<_> = simulations
+                .iter()
+                .filter(|s| s.emulator_used.is_none())
+                .collect();
+
+            if native_simulations.is_empty() {
+                if !multiple_blocks {
+                    return Err(anyhow!(
+                        "No native simulations found for block #{}\n\n\
+                         The emulate command requires native simulation results as ground truth.\n\n\
+                         Workflow:\n\
+                         1. On x86 machine: snippex simulate {} --runs N\n\
+                         2. On x86 machine: snippex export -o results.json\n\
+                         3. On ARM64 machine: snippex import-results results.json\n\
+                         4. On ARM64 machine: snippex emulate {}",
+                        block_number, block_number, block_number
+                    ));
+                }
+                blocks_with_no_simulations += 1;
+                if self.verbose {
+                    println!(
+                        "  {} Block #{}: No native simulations found, skipping",
+                        style("⚠").yellow(),
+                        block_number
+                    );
+                }
+                continue;
+            }
+
+            // Filter by simulation ID if specified
+            let simulations_to_run: Vec<_> = if let Some(ref target_id) = self.simulation_id {
+                native_simulations
+                    .into_iter()
+                    .filter(|s| s.simulation_id == *target_id)
+                    .collect()
+            } else {
+                native_simulations
+            };
+
+            if simulations_to_run.is_empty() {
+                if let Some(ref target_id) = self.simulation_id {
+                    eprintln!(
+                        "  {} Simulation '{}' not found for block #{}",
+                        style("⚠").yellow(),
+                        target_id,
+                        block_number
+                    );
+                }
+                continue;
+            }
+
+            if multiple_blocks {
+                println!(
+                    "{} Block #{} ({}/{})",
+                    style("▶").cyan(),
+                    block_number,
+                    block_idx + 1,
+                    block_numbers.len()
+                );
+            } else {
+                println!(
+                    "{}",
+                    style(format!("Emulating block #{}", block_number))
+                        .bold()
+                        .cyan()
+                );
+            }
+            println!("  Binary: {}", style(&extraction.binary_path).dim());
+            println!(
+                "  Range:  {} - {}",
+                style(format!("0x{:08x}", extraction.start_address)).yellow(),
+                style(format!("0x{:08x}", extraction.end_address)).yellow()
+            );
+            println!(
+                "  Native simulations to replay: {}",
+                simulations_to_run.len()
+            );
+            println!();
+
+            let mut block_pass = 0;
+            let mut block_fail = 0;
+
+            for (i, native_sim) in simulations_to_run.iter().enumerate() {
+                let sim_num = i + 1;
+                let total = simulations_to_run.len();
+
+                if self.verbose {
+                    println!(
+                        "  [{}/{}] Replaying simulation {}...",
+                        sim_num,
+                        total,
+                        &native_sim.simulation_id[..8.min(native_sim.simulation_id.len())]
+                    );
+                }
+
+                // Run through FEX-Emu with the same initial state
+                let fex_result = simulator.simulate_block_with_state(
+                    extraction,
+                    &analysis,
+                    &native_sim.initial_state,
+                    Some(fex_config.clone()),
+                    self.keep_files,
+                );
+
+                match fex_result {
+                    Ok(fex_sim) => {
+                        // Compare FEX result against native oracle
+                        let comparison = EmulationComparison::compare(
+                            &native_sim.simulation_id,
+                            &native_sim.final_state,
+                            &fex_sim.final_state,
+                            native_sim.exit_code,
+                            fex_sim.exit_code,
+                        );
+
+                        if comparison.is_pass() {
+                            block_pass += 1;
+                            if self.verbose {
+                                println!("    {} PASS", style("✓").green());
+                            }
+                        } else {
+                            block_fail += 1;
+                            self.print_failure(&comparison, native_sim, &fex_sim);
+
+                            if self.stop_on_failure {
+                                println!();
+                                println!(
+                                    "{}",
+                                    style("Stopping on first failure (--stop-on-failure)").red()
+                                );
+                                total_pass += block_pass;
+                                total_fail += block_fail;
+                                return Err(anyhow!("Emulation mismatch detected"));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        block_fail += 1;
+                        println!(
+                            "  [{}/{}] {} FEX execution failed: {}",
+                            sim_num,
+                            total,
+                            style("✗").red(),
+                            e
+                        );
+
+                        if self.stop_on_failure {
+                            total_pass += block_pass;
+                            total_fail += block_fail;
+                            return Err(anyhow!("FEX execution failed: {}", e));
+                        }
                     }
                 }
+            }
+
+            total_pass += block_pass;
+            total_fail += block_fail;
+
+            if multiple_blocks {
+                println!(
+                    "  Block #{}: {} passed, {} failed",
+                    block_number,
+                    style(block_pass).green(),
+                    if block_fail > 0 {
+                        style(block_fail).red()
+                    } else {
+                        style(block_fail).green()
+                    }
+                );
             }
         }
 
         // Summary
         println!();
-        println!("{}", style("─".repeat(60)).dim());
+        println!("{}", style("═".repeat(60)).dim());
         println!(
-            "Summary: {} passed, {} failed",
-            style(pass_count).green().bold(),
-            if fail_count > 0 {
-                style(fail_count).red().bold()
+            "Total: {} passed, {} failed",
+            style(total_pass).green().bold(),
+            if total_fail > 0 {
+                style(total_fail).red().bold()
             } else {
-                style(fail_count).green().bold()
+                style(total_fail).green().bold()
             }
         );
 
-        if fail_count > 0 {
+        if blocks_with_no_simulations > 0 {
+            println!(
+                "  ({} blocks had no native simulations)",
+                blocks_with_no_simulations
+            );
+        }
+
+        if total_fail > 0 {
             println!();
             println!(
                 "{}",
@@ -335,8 +426,8 @@ impl EmulateCommand {
             println!("  This may indicate a bug in FEX-Emu.");
             Err(anyhow!(
                 "{} of {} simulations produced different results",
-                fail_count,
-                pass_count + fail_count
+                total_fail,
+                total_pass + total_fail
             ))
         } else {
             println!();
@@ -354,10 +445,16 @@ impl EmulateCommand {
         native: &SimulationResult,
         fex: &SimulationResult,
     ) {
+        let sim_id_display = if comparison.simulation_id.len() > 8 {
+            &comparison.simulation_id[..8]
+        } else {
+            &comparison.simulation_id
+        };
+
         println!(
             "  {} FAIL - Simulation {}",
             style("✗").red().bold(),
-            &comparison.simulation_id[..8]
+            sim_id_display
         );
 
         if !comparison.exit_code_match {

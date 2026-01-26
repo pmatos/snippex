@@ -4,12 +4,13 @@ use clap::Args;
 use std::path::PathBuf;
 
 use crate::analyzer::{Analyzer, ExitType};
+use crate::cli::block_range::BlockRange;
 use crate::db::Database;
 
 #[derive(Args)]
 pub struct AnalyzeCommand {
-    #[arg(help = "Block number to analyze (as shown by list command)")]
-    block_number: usize,
+    #[arg(help = "Block(s) to analyze: 5, 1-10, 5-, 3,7,12, or all")]
+    blocks: BlockRange,
 
     #[arg(
         short,
@@ -18,6 +19,9 @@ pub struct AnalyzeCommand {
         help = "SQLite database path"
     )]
     database: PathBuf,
+
+    #[arg(long, help = "Override host architecture for testing (x86_64 or aarch64)")]
+    arch: Option<String>,
 
     #[arg(short, long, help = "Show detailed analysis information")]
     verbose: bool,
@@ -28,7 +32,6 @@ pub struct AnalyzeCommand {
 
 impl AnalyzeCommand {
     pub fn execute(self) -> Result<()> {
-        // Check if database exists
         if !self.database.exists() {
             return Err(anyhow!(
                 "Database not found at '{}'\n\n\
@@ -36,13 +39,12 @@ impl AnalyzeCommand {
                  • Extract blocks first: snippex extract <binary>\n\
                  • Specify a different database: snippex analyze {} -d <path>",
                 self.database.display(),
-                self.block_number
+                self.blocks
             ));
         }
 
         let mut db = Database::new(&self.database)?;
 
-        // Get the extraction to analyze
         let extractions = match db.list_extractions() {
             Ok(extractions) => extractions,
             Err(_) => {
@@ -55,41 +57,83 @@ impl AnalyzeCommand {
             }
         };
 
-        if self.block_number == 0 || self.block_number > extractions.len() {
-            return Err(anyhow!(
-                "Invalid block number: {}\n\n\
-                 Valid block range: 1-{}\n\n\
-                 Suggestions:\n\
-                 • List available blocks: snippex list",
-                self.block_number,
-                extractions.len()
-            ));
-        }
+        let block_numbers = self.blocks.resolve(extractions.len())?;
+        let multiple = block_numbers.len() > 1;
 
-        let extraction = &extractions[self.block_number - 1];
+        let mut success_count = 0;
+        let mut error_count = 0;
 
-        println!("Analyzing block #{}...", self.block_number);
-        println!("  Binary: {}", extraction.binary_path);
-        println!(
-            "  Address range: 0x{:08x} - 0x{:08x}",
-            extraction.start_address, extraction.end_address
-        );
-        println!();
+        for (i, block_number) in block_numbers.iter().enumerate() {
+            if multiple && i > 0 {
+                println!();
+                println!("{}", "═".repeat(60));
+                println!();
+            }
 
-        // Show disassembly if requested
-        if self.disassemble {
-            self.print_disassembly(extraction)?;
+            let extraction = &extractions[block_number - 1];
+
+            println!("Analyzing block #{}...", block_number);
+            println!("  Binary: {}", extraction.binary_path);
+            println!(
+                "  Address range: 0x{:08x} - 0x{:08x}",
+                extraction.start_address, extraction.end_address
+            );
             println!();
+
+            if self.disassemble {
+                if let Err(e) = self.print_disassembly(extraction) {
+                    eprintln!("  Disassembly error: {}", e);
+                } else {
+                    println!();
+                }
+            }
+
+            let analyzer = Analyzer::new(&extraction.binary_architecture);
+
+            match analyzer.analyze_block(&extraction.assembly_block, extraction.start_address) {
+                Ok(analysis) => {
+                    self.print_analysis(&analysis);
+
+                    if self.verbose {
+                        println!();
+                        println!("Storing analysis results in database...");
+                    }
+
+                    if let Err(e) = db.store_analysis(
+                        extraction.start_address,
+                        extraction.end_address,
+                        &extraction.binary_hash,
+                        &analysis,
+                    ) {
+                        eprintln!("  Failed to store analysis: {}", e);
+                        error_count += 1;
+                    } else {
+                        println!();
+                        println!("✓ Analysis completed and stored successfully");
+                        success_count += 1;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("✗ Analysis failed: {}", e);
+                    error_count += 1;
+                }
+            }
         }
 
-        // Create analyzer based on architecture
-        let analyzer = Analyzer::new(&extraction.binary_architecture);
+        if multiple {
+            println!();
+            println!("{}", "═".repeat(60));
+            println!("Summary: {} succeeded, {} failed", success_count, error_count);
+        }
 
-        // Analyze the block
-        let analysis =
-            analyzer.analyze_block(&extraction.assembly_block, extraction.start_address)?;
+        if error_count > 0 && success_count == 0 {
+            Err(anyhow!("All analyses failed"))
+        } else {
+            Ok(())
+        }
+    }
 
-        // Display results
+    fn print_analysis(&self, analysis: &crate::analyzer::BlockAnalysis) {
         println!("Analysis Results:");
         println!("=================");
         println!("Instructions: {}", analysis.instructions_count);
@@ -188,24 +232,6 @@ impl AnalyzeCommand {
                 println!();
             }
         }
-
-        if self.verbose {
-            println!();
-            println!("Storing analysis results in database...");
-        }
-
-        // Store analysis results
-        db.store_analysis(
-            extraction.start_address,
-            extraction.end_address,
-            &extraction.binary_hash,
-            &analysis,
-        )?;
-
-        println!();
-        println!("✓ Analysis completed and stored successfully");
-
-        Ok(())
     }
 
     fn print_disassembly(&self, extraction: &crate::db::ExtractionInfo) -> Result<()> {

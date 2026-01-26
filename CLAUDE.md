@@ -42,6 +42,18 @@ The testing methodology requires **native x86 execution as ground truth**:
 
 **Key insight:** The `emulate` command loads stored native simulation results (with their initial states), replays them through FEX-Emu using the exact same inputs, and compares the outputs. Any discrepancy indicates a potential FEX-Emu bug.
 
+### Block Range Syntax
+
+Commands that operate on blocks (`analyze`, `simulate`, `emulate`) accept flexible block specifications:
+
+- `5` - Single block
+- `1-10` - Range (inclusive)
+- `5-` - From block 5 to the end
+- `3,7,12` - Specific blocks
+- `all` - All blocks
+
+Example: `snippex simulate all --runs 5` simulates all blocks with 5 runs each.
+
 ### Why Native Execution is Essential
 
 Native x86 execution provides definitive ground truth for correctness. Alternative approaches are problematic:

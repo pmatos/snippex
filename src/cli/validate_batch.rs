@@ -1,6 +1,13 @@
 //! Batch validation command for validating multiple blocks.
+//!
+//! **DEPRECATED**: This command will be removed in a future version.
+//! Use `validate` with block range syntax instead:
+//!   - `snippex validate 1-100` (range)
+//!   - `snippex validate all` (all blocks)
+//!   - `snippex validate 1,5,10` (specific blocks)
 
 use anyhow::{anyhow, Result};
+use console::style;
 use clap::Args;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
@@ -153,6 +160,20 @@ pub struct BatchOutput {
 
 impl ValidateBatchCommand {
     pub fn execute(self) -> Result<()> {
+        // Show deprecation warning
+        eprintln!(
+            "{}: validate-batch is deprecated and will be removed in a future version.",
+            style("Warning").yellow().bold()
+        );
+        eprintln!(
+            "  Use '{}' with block range syntax instead:",
+            style("snippex validate").cyan()
+        );
+        eprintln!("    snippex validate 1-100    # range");
+        eprintln!("    snippex validate all      # all blocks");
+        eprintln!("    snippex validate 1,5,10   # specific blocks");
+        eprintln!();
+
         if !self.database.exists() {
             return Err(anyhow!("No database found"));
         }
