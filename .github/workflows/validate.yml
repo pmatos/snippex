@@ -54,7 +54,7 @@ jobs:
         run: cargo build --release
 
       - name: Upload binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: snippex-binary
           path: target/release/snippex
@@ -132,7 +132,7 @@ jobs:
           ./bin/snippex stats summary --database validation.db || true
 
       - name: Upload database
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: validation-db-x86
           path: validation.db
@@ -140,7 +140,7 @@ jobs:
 
       - name: Upload validation logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: validation-logs-x86
           path: |

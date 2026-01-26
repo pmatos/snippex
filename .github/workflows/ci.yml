@@ -126,7 +126,7 @@ jobs:
         run: cargo build --release
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: snippex-linux-x86_64
           path: target/release/snippex
@@ -275,7 +275,7 @@ jobs:
           ./target/release/snippex regression export -o baseline.json
 
       - name: Upload regression baseline
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: regression-baseline
           path: baseline.json
