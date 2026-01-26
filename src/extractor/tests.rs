@@ -424,7 +424,9 @@ mod extractor_tests {
         for _ in 0..50 {
             if let Ok((start_addr, _, assembly_block)) = extractor.extract_random_aligned_block() {
                 let filter = ExtractionFilter::new();
-                if let Ok(result) = extractor.check_block_filter(&assembly_block, start_addr, &filter) {
+                if let Ok(result) =
+                    extractor.check_block_filter(&assembly_block, start_addr, &filter)
+                {
                     if result.has_control_flow {
                         found_with_control_flow = true;
 

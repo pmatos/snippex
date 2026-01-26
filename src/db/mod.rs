@@ -568,12 +568,12 @@ impl Database {
         // Delete in correct order due to foreign key constraints:
         // 1. Delete all tables that reference extractions
         // Ignore "no such table" errors for older databases
-        let delete_table = |tx: &rusqlite::Transaction, table: &str| {
-            match tx.execute(&format!("DELETE FROM {}", table), []) {
-                Ok(_) => Ok(()),
-                Err(e) if e.to_string().contains("no such table") => Ok(()),
-                Err(e) => Err(e),
-            }
+        let delete_table = |tx: &rusqlite::Transaction, table: &str| match tx
+            .execute(&format!("DELETE FROM {}", table), [])
+        {
+            Ok(_) => Ok(()),
+            Err(e) if e.to_string().contains("no such table") => Ok(()),
+            Err(e) => Err(e),
         };
         delete_table(&tx, "fex_test_results")?;
         delete_table(&tx, "fex_baselines")?;

@@ -60,7 +60,10 @@ pub struct ExtractCommand {
     #[arg(long, help = "Only extract blocks without memory access instructions")]
     no_memory_access: bool,
 
-    #[arg(long, help = "Only extract blocks with control flow instructions (jumps, calls, returns)")]
+    #[arg(
+        long,
+        help = "Only extract blocks with control flow instructions (jumps, calls, returns)"
+    )]
     has_control_flow: bool,
 
     #[arg(long, help = "Only extract blocks without control flow instructions")]
