@@ -111,9 +111,14 @@ impl RemoteOrchestrator {
     /// # Returns
     ///
     /// The `SimulationResult` from the remote execution
-    pub fn execute_remote_simulation(
+    /// Execute a remote simulation, optionally with a pre-compiled binary.
+    ///
+    /// If `simulation_binary` is provided, it will be included in the package and
+    /// used directly on the remote machine (no recompilation needed).
+    pub fn execute_remote_simulation_with_binary(
         &self,
         package: &ExecutionPackage,
+        simulation_binary: Option<&Path>,
     ) -> Result<SimulationResult> {
         info!("Starting remote simulation execution");
 
@@ -123,7 +128,7 @@ impl RemoteOrchestrator {
 
         // Save package to temporary directory (include binary for remote execution)
         debug!("Saving package to temporary directory");
-        package.save_to_directory(&package_dir, true)?;
+        package.save_to_directory_with_options(&package_dir, true, simulation_binary)?;
 
         // Create tarball from package directory
         let tarball_path = temp_dir.path().join("package.tar.gz");
@@ -182,6 +187,15 @@ impl RemoteOrchestrator {
         }
 
         Ok(result)
+    }
+
+    /// Execute a remote simulation (without pre-compiled binary).
+    /// The remote machine will compile the assembly from scratch.
+    pub fn execute_remote_simulation(
+        &self,
+        package: &ExecutionPackage,
+    ) -> Result<SimulationResult> {
+        self.execute_remote_simulation_with_binary(package, None)
     }
 
     /// Executes the simulation on the remote machine using the snippex binary.

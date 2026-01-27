@@ -193,8 +193,11 @@ pub struct ExecutionPackage {
     pub initial_state: InitialState,
     /// Emulator configuration
     pub emulator: Option<EmulatorData>,
-    /// Whether the binary file is included in the package
+    /// Whether the source binary file is included in the package
     pub binary_included: bool,
+    /// Whether a pre-compiled simulation binary is included (skip compilation on remote)
+    #[serde(default)]
+    pub simulation_binary_included: bool,
 }
 
 impl ExecutionPackage {
@@ -212,11 +215,22 @@ impl ExecutionPackage {
             initial_state: initial_state.clone(),
             emulator: emulator.map(EmulatorData::from),
             binary_included: false,
+            simulation_binary_included: false,
         }
     }
 
-    /// Save the package to a directory, optionally including the binary.
-    pub fn save_to_directory(&self, dir: &Path, include_binary: bool) -> Result<PathBuf> {
+    /// Save the package to a directory, optionally including binaries.
+    ///
+    /// Arguments:
+    /// - `dir`: Directory to save the package to
+    /// - `include_binary`: Whether to include the source binary (for address translation)
+    /// - `simulation_binary`: Optional path to a pre-compiled simulation binary to include
+    pub fn save_to_directory_with_options(
+        &self,
+        dir: &Path,
+        include_binary: bool,
+        simulation_binary: Option<&Path>,
+    ) -> Result<PathBuf> {
         // Create the package directory
         fs::create_dir_all(dir).map_err(Error::Io)?;
 
@@ -253,29 +267,57 @@ impl ExecutionPackage {
             fs::write(&emulator_path, emulator_json).map_err(Error::Io)?;
         }
 
-        // Copy binary file if requested and source exists
+        let mut manifest = serde_json::json!({});
+
+        // Copy source binary file if requested and source exists
         if include_binary {
             let binary_source = Path::new(&self.extraction.binary_path);
             if binary_source.exists() {
                 let binary_dest = dir.join("binary");
                 fs::copy(binary_source, &binary_dest).map_err(Error::Io)?;
-
-                // Update manifest to indicate binary is included
-                let manifest_path = dir.join("manifest.json");
-                let manifest = serde_json::json!({
-                    "binary_included": true,
-                    "binary_filename": "binary",
-                    "original_path": self.extraction.binary_path,
-                });
-                fs::write(
-                    &manifest_path,
-                    serde_json::to_string_pretty(&manifest).unwrap(),
-                )
-                .map_err(Error::Io)?;
+                manifest["binary_included"] = serde_json::json!(true);
+                manifest["binary_filename"] = serde_json::json!("binary");
+                manifest["original_path"] = serde_json::json!(self.extraction.binary_path);
             }
         }
 
+        // Copy pre-compiled simulation binary if provided
+        if let Some(sim_binary_path) = simulation_binary {
+            if sim_binary_path.exists() {
+                let sim_binary_dest = dir.join("simulation_binary");
+                fs::copy(sim_binary_path, &sim_binary_dest).map_err(Error::Io)?;
+                // Make executable
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mut perms = fs::metadata(&sim_binary_dest)
+                        .map_err(Error::Io)?
+                        .permissions();
+                    perms.set_mode(0o755);
+                    fs::set_permissions(&sim_binary_dest, perms).map_err(Error::Io)?;
+                }
+                manifest["simulation_binary_included"] = serde_json::json!(true);
+                manifest["simulation_binary_filename"] = serde_json::json!("simulation_binary");
+            }
+        }
+
+        // Write manifest if we have any content
+        if !manifest.as_object().is_none_or(|o| o.is_empty()) {
+            let manifest_path = dir.join("manifest.json");
+            fs::write(
+                &manifest_path,
+                serde_json::to_string_pretty(&manifest).unwrap(),
+            )
+            .map_err(Error::Io)?;
+        }
+
         Ok(dir.to_path_buf())
+    }
+
+    /// Save the package to a directory, optionally including the source binary.
+    /// For including a pre-compiled simulation binary, use `save_to_directory_with_options`.
+    pub fn save_to_directory(&self, dir: &Path, include_binary: bool) -> Result<PathBuf> {
+        self.save_to_directory_with_options(dir, include_binary, None)
     }
 
     /// Load a package from a directory.
@@ -315,9 +357,25 @@ impl ExecutionPackage {
             None
         };
 
-        // Check if binary is included
+        // Check manifest for included binaries
         let manifest_path = dir.join("manifest.json");
-        let binary_included = manifest_path.exists();
+        let (binary_included, simulation_binary_included) = if manifest_path.exists() {
+            let manifest_json = fs::read_to_string(&manifest_path).map_err(Error::Io)?;
+            let manifest: serde_json::Value = serde_json::from_str(&manifest_json)
+                .map_err(|e| Error::InvalidBinary(format!("Failed to parse manifest: {}", e)))?;
+            (
+                manifest
+                    .get("binary_included")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                manifest
+                    .get("simulation_binary_included")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+            )
+        } else {
+            (false, false)
+        };
 
         Ok(Self {
             metadata,
@@ -326,6 +384,7 @@ impl ExecutionPackage {
             initial_state,
             emulator,
             binary_included,
+            simulation_binary_included,
         })
     }
 
@@ -381,6 +440,18 @@ impl ExecutionPackage {
         } else {
             None
         }
+    }
+
+    /// Get the path to the pre-compiled simulation binary within the package directory.
+    /// Returns None if no simulation binary was included in the package.
+    pub fn get_simulation_binary_path(&self, package_dir: &Path) -> Option<PathBuf> {
+        if self.simulation_binary_included {
+            let sim_binary_path = package_dir.join("simulation_binary");
+            if sim_binary_path.exists() {
+                return Some(sim_binary_path);
+            }
+        }
+        None
     }
 
     /// Convert extraction data back to ExtractionInfo for simulation.

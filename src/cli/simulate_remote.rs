@@ -2,6 +2,9 @@
 //!
 //! This command is designed to be invoked on a remote machine after an
 //! ExecutionPackage has been transferred via SCP.
+//!
+//! If the package includes a pre-compiled simulation binary, it will be used
+//! directly without re-compiling (faster and avoids NASM version issues).
 
 use anyhow::{anyhow, Result};
 use clap::Args;
@@ -135,18 +138,28 @@ impl SimulateRemoteCommand {
             println!("  Emulator: native");
         }
 
+        // Check for pre-compiled simulation binary
+        let simulation_binary_path = package.get_simulation_binary_path(&package_dir);
+
         // Initialize simulator with the target architecture from the package
         let target_arch = &package.extraction.binary_architecture;
-        let mut simulator = Simulator::for_target(target_arch)?;
+        let simulator = Simulator::for_target(target_arch)?;
 
-        // Run simulation with the provided initial state
-        let result = simulator.simulate_block_with_state(
-            &extraction_info,
-            &analysis,
-            initial_state,
-            emulator_config,
-            self.keep_files,
-        )?;
+        // Run simulation - use pre-compiled binary if available, otherwise compile from scratch
+        let result = if let Some(ref sim_binary) = simulation_binary_path {
+            println!("  Using pre-compiled binary: {}", sim_binary.display());
+            simulator.run_precompiled_binary(sim_binary, initial_state, emulator_config)?
+        } else {
+            println!("  Compiling from assembly...");
+            let mut simulator = simulator;
+            simulator.simulate_block_with_state(
+                &extraction_info,
+                &analysis,
+                initial_state,
+                emulator_config,
+                self.keep_files,
+            )?
+        };
 
         println!("  Status: Completed");
         println!("  Execution time: {:?}", result.execution_time);

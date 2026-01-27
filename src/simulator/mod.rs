@@ -143,17 +143,6 @@ impl Simulator {
             sandbox.as_ref(),
         )?;
 
-        // DEBUG: Save assembly to /tmp for inspection
-        let debug_asm_path = format!("/tmp/debug_simulation_{}.asm", Uuid::new_v4());
-        if let Err(e) = std::fs::write(&debug_asm_path, &assembly_source) {
-            eprintln!(
-                "Warning: Could not save debug assembly to {}: {}",
-                debug_asm_path, e
-            );
-        } else {
-            eprintln!("DEBUG: Assembly saved to {}", debug_asm_path);
-        }
-
         // Compile and link
         let (binary_path, assembly_path) = self
             .compilation_pipeline
@@ -190,6 +179,121 @@ impl Simulator {
             )),
             assembly_file_path,
             binary_file_path,
+        ))
+    }
+
+    /// Compile a simulation binary without executing it.
+    /// Returns the path to the compiled binary in a persistent location.
+    /// Used when we need to compile once and run through multiple emulators.
+    pub fn compile_simulation_binary(
+        &self,
+        extraction: &ExtractionInfo,
+        analysis: &BlockAnalysis,
+        initial_state: &InitialState,
+    ) -> crate::error::Result<std::path::PathBuf> {
+        // Create sandbox with address translation if binary has valid base address
+        let sandbox = if extraction.binary_base_address > 0 {
+            use crate::extractor::section_loader::BinarySectionLoader;
+            use sandbox::SandboxMemoryLayout;
+            use std::path::Path;
+
+            let binary_path = Path::new(&extraction.binary_path);
+            if binary_path.exists() {
+                let mut sandbox_layout = SandboxMemoryLayout::new(extraction.binary_base_address);
+
+                if let Ok(loader) = BinarySectionLoader::new(binary_path) {
+                    if let Ok((text_meta, text_data)) = loader.extract_text_section() {
+                        let _ = sandbox_layout.add_section(text_meta, Some(text_data));
+                    }
+                    if let Ok((data_meta, data_data)) = loader.extract_data_section() {
+                        let _ = sandbox_layout.add_section(data_meta, Some(data_data));
+                    }
+                    if let Ok((rodata_meta, rodata_data)) = loader.extract_rodata_section() {
+                        let _ = sandbox_layout.add_section(rodata_meta, Some(rodata_data));
+                    }
+                    Some(sandbox_layout)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Generate assembly file with sandbox for address translation
+        let assembly_source = self.assembly_generator.generate_simulation_file(
+            extraction,
+            analysis,
+            initial_state,
+            sandbox.as_ref(),
+        )?;
+
+        // Compile and link (binary is in pipeline's temp dir)
+        let (temp_binary_path, _assembly_path) = self
+            .compilation_pipeline
+            .compile_and_link(&assembly_source, &format!("simulation_{}", Uuid::new_v4()))?;
+
+        // Copy binary to a persistent location (outside the pipeline's temp dir)
+        // This prevents the binary from being deleted when the simulator is dropped
+        let persistent_path =
+            std::path::PathBuf::from(format!("/tmp/snippex_sim_{}", Uuid::new_v4()));
+        std::fs::copy(&temp_binary_path, &persistent_path).map_err(|e| {
+            crate::error::Error::Simulation(format!(
+                "Failed to copy binary to persistent location: {}",
+                e
+            ))
+        })?;
+
+        // Make it executable
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&persistent_path)
+                .map_err(|e| {
+                    crate::error::Error::Simulation(format!(
+                        "Failed to get binary permissions: {}",
+                        e
+                    ))
+                })?
+                .permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&persistent_path, perms).map_err(|e| {
+                crate::error::Error::Simulation(format!("Failed to set binary permissions: {}", e))
+            })?;
+        }
+
+        Ok(persistent_path)
+    }
+
+    /// Run a pre-compiled binary directly, skipping assembly generation and compilation.
+    /// Used for remote execution where we transfer the compiled binary instead of re-compiling.
+    pub fn run_precompiled_binary(
+        &self,
+        binary_path: &std::path::Path,
+        initial_state: &InitialState,
+        emulator: Option<EmulatorConfig>,
+    ) -> crate::error::Result<SimulationResult> {
+        // Execute the pre-compiled binary
+        let execution_result = self
+            .execution_harness
+            .execute_binary(binary_path, emulator.as_ref())?;
+
+        // Parse final state from execution output
+        let final_state = FinalState::parse_from_output(&execution_result.output_data)?;
+
+        Ok(SimulationResult::new(
+            initial_state.clone(),
+            final_state,
+            execution_result.execution_time,
+            execution_result.exit_code,
+            Some(emulator.map_or_else(
+                || EmulatorConfig::Native.name_with_host_info(),
+                |e| e.name_with_host_info(),
+            )),
+            None, // No assembly file - we used pre-compiled binary
+            Some(binary_path.to_string_lossy().to_string()),
         ))
     }
 }
