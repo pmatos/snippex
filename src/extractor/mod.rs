@@ -23,6 +23,8 @@ pub enum InstructionCategory {
     Avx512,
     Branch,
     Syscall,
+    /// Skipped/invalid bytes (from SKIPDATA mode) - never matches filters
+    Invalid,
 }
 
 impl std::str::FromStr for InstructionCategory {
@@ -37,6 +39,7 @@ impl std::str::FromStr for InstructionCategory {
             "avx512" => Ok(Self::Avx512),
             "branch" | "jump" => Ok(Self::Branch),
             "syscall" | "system" => Ok(Self::Syscall),
+            "invalid" => Ok(Self::Invalid),
             _ => Err(format!("Unknown instruction category: {}", s)),
         }
     }
@@ -52,6 +55,7 @@ impl InstructionCategory {
             Self::Avx512 => "avx512",
             Self::Branch => "branch",
             Self::Syscall => "syscall",
+            Self::Invalid => "invalid",
         }
     }
 }
@@ -306,7 +310,25 @@ impl Extractor {
         &self,
         file: &'a object::File<'a>,
     ) -> Result<object::Section<'a, 'a>> {
-        // Try common executable section names in order of preference
+        // For PE files, prefer the section containing the entry point
+        // This handles packed/protected executables where .text may contain encrypted data
+        let entry = file.entry();
+        if entry != 0 {
+            for section in file.sections() {
+                let start = section.address();
+                let end = start + section.size();
+                if entry >= start && entry < end {
+                    // Found section containing entry point
+                    if section.kind() == SectionKind::Text
+                        || section.name().map(|n| n.contains("CODE") || n.contains("code") || n == ".bind").unwrap_or(false)
+                    {
+                        return Ok(section);
+                    }
+                }
+            }
+        }
+
+        // Fallback: try common executable section names in order of preference
         let section_names = match self.detect_format()? {
             SupportedFormat::Elf => vec![".text"],
             SupportedFormat::Pe => vec![".text", "CODE", ".code"],
@@ -775,6 +797,11 @@ impl Extractor {
         meta: &InstructionMeta,
         filter: &ExtractionFilter,
     ) -> bool {
+        // Invalid/skipped data never matches
+        if meta.category == InstructionCategory::Invalid {
+            return false;
+        }
+
         // Check memory access
         if let Some(require_mem) = filter.require_memory_access {
             if require_mem != meta.has_memory_access {
@@ -890,7 +917,7 @@ impl Extractor {
     fn create_capstone_with_detail(&self) -> Result<capstone::Capstone> {
         let binary_info = self.get_binary_info()?;
 
-        let cs = match binary_info.architecture.as_str() {
+        let mut cs = match binary_info.architecture.as_str() {
             "i386" => capstone::Capstone::new()
                 .x86()
                 .mode(arch::x86::ArchMode::Mode32)
@@ -916,11 +943,22 @@ impl Extractor {
             }
         };
 
+        // Enable SKIPDATA to continue past invalid byte sequences
+        // This is important for packed/protected executables with encrypted regions
+        cs.set_skipdata(true).map_err(|e| {
+            SnippexError::BinaryParsing(format!("Failed to enable SKIPDATA: {e}"))
+        })?;
+
         Ok(cs)
     }
 
     /// Categorize an instruction by its mnemonic.
     fn categorize_instruction(mnemonic: &str) -> InstructionCategory {
+        // SKIPDATA pseudo-instructions (invalid/skipped bytes)
+        if mnemonic.starts_with('.') || mnemonic == "db" {
+            return InstructionCategory::Invalid;
+        }
+
         let mnemonic_upper = mnemonic.to_uppercase();
 
         // Syscall instructions

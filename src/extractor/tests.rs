@@ -318,7 +318,11 @@ mod extractor_tests {
             "syscall".parse::<InstructionCategory>().unwrap(),
             InstructionCategory::Syscall
         );
-        assert!("invalid".parse::<InstructionCategory>().is_err());
+        assert_eq!(
+            "invalid".parse::<InstructionCategory>().unwrap(),
+            InstructionCategory::Invalid
+        );
+        assert!("nonexistent".parse::<InstructionCategory>().is_err());
     }
 
     #[test]
@@ -330,6 +334,7 @@ mod extractor_tests {
         assert_eq!(InstructionCategory::Avx512.as_str(), "avx512");
         assert_eq!(InstructionCategory::Branch.as_str(), "branch");
         assert_eq!(InstructionCategory::Syscall.as_str(), "syscall");
+        assert_eq!(InstructionCategory::Invalid.as_str(), "invalid");
     }
 
     #[test]
