@@ -177,8 +177,7 @@ impl ComparisonResult {
         ignore_flags_mask: u64,
     ) -> Self {
         let exit_codes_match = native_exit == fex_exit;
-        let flags_match =
-            (native.flags & !ignore_flags_mask) == (fex.flags & !ignore_flags_mask);
+        let flags_match = (native.flags & !ignore_flags_mask) == (fex.flags & !ignore_flags_mask);
 
         let mut register_differences = Vec::new();
         let mut registers_match = true;
@@ -249,7 +248,12 @@ impl ValidateCommand {
                 "IF" => X86Flags::IF_BIT,
                 "DF" => X86Flags::DF_BIT,
                 "OF" => X86Flags::OF_BIT,
-                _ => return Err(anyhow!("Unknown flag: '{}'. Valid flags: CF, PF, AF, ZF, SF, TF, IF, DF, OF", name)),
+                _ => {
+                    return Err(anyhow!(
+                        "Unknown flag: '{}'. Valid flags: CF, PF, AF, ZF, SF, TF, IF, DF, OF",
+                        name
+                    ))
+                }
             };
             mask |= 1 << bit;
         }
@@ -684,7 +688,9 @@ impl ValidateCommand {
             if single_run {
                 println!();
 
-                if let Some((native, fex, comparison, _seed, binary_path)) = last_failed_comparison.take() {
+                if let Some((native, fex, comparison, _seed, binary_path)) =
+                    last_failed_comparison.take()
+                {
                     self.display_results(
                         &Some(native),
                         &Some(fex),
@@ -722,7 +728,9 @@ impl ValidateCommand {
                 println!();
                 self.display_run_summary(&stats, &native_target, &fex_target);
 
-                if let Some((native, fex, comparison, seed, binary_path)) = last_failed_comparison.take() {
+                if let Some((native, fex, comparison, seed, binary_path)) =
+                    last_failed_comparison.take()
+                {
                     println!();
                     println!("First failure (seed {}):", seed);
                     self.display_results(
