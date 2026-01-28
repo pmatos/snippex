@@ -320,7 +320,10 @@ impl Extractor {
                 if entry >= start && entry < end {
                     // Found section containing entry point
                     if section.kind() == SectionKind::Text
-                        || section.name().map(|n| n.contains("CODE") || n.contains("code") || n == ".bind").unwrap_or(false)
+                        || section
+                            .name()
+                            .map(|n| n.contains("CODE") || n.contains("code") || n == ".bind")
+                            .unwrap_or(false)
                     {
                         return Ok(section);
                     }
@@ -945,9 +948,8 @@ impl Extractor {
 
         // Enable SKIPDATA to continue past invalid byte sequences
         // This is important for packed/protected executables with encrypted regions
-        cs.set_skipdata(true).map_err(|e| {
-            SnippexError::BinaryParsing(format!("Failed to enable SKIPDATA: {e}"))
-        })?;
+        cs.set_skipdata(true)
+            .map_err(|e| SnippexError::BinaryParsing(format!("Failed to enable SKIPDATA: {e}")))?;
 
         Ok(cs)
     }
