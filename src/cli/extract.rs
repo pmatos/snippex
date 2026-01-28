@@ -758,7 +758,8 @@ impl ExtractCommand {
                         self.validation_runs, self.validation_runs
                     );
                 }
-                let is_new = db.store_extraction(binary_info, start_addr, end_addr, &assembly_block)?;
+                let is_new =
+                    db.store_extraction(binary_info, start_addr, end_addr, &assembly_block)?;
                 if !self.quiet {
                     if is_new {
                         println!("✓ Valid block stored in database");
@@ -834,7 +835,8 @@ impl ExtractCommand {
                         self.validation_runs, self.validation_runs
                     );
                 }
-                let is_new = db.store_extraction(binary_info, start_addr, end_addr, &assembly_block)?;
+                let is_new =
+                    db.store_extraction(binary_info, start_addr, end_addr, &assembly_block)?;
                 if is_new {
                     stored += 1;
                     consecutive_dupes = 0;
