@@ -3,11 +3,13 @@ use clap::{Args, ValueEnum};
 use indicatif::{ProgressBar, ProgressStyle};
 use log::debug;
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::analyzer::complexity::{ComplexityAnalyzer, ComplexityScore};
-use crate::db::Database;
+use crate::analyzer::Analyzer;
+use crate::db::{BinaryInfo, Database};
 use crate::extractor::{ExtractionFilter, Extractor, InstructionCategory};
+use crate::simulator::Simulator;
 
 /// Selection strategy for smart block extraction.
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
@@ -115,6 +117,25 @@ pub struct ExtractCommand {
         help = "Show detailed selection report explaining why blocks were chosen"
     )]
     selection_report: bool,
+
+    #[arg(
+        long,
+        help = "Only keep blocks that execute natively (simulates each block)"
+    )]
+    valid_only: bool,
+
+    #[arg(
+        long,
+        default_value = "5",
+        help = "Number of native simulation runs for --valid-only validation"
+    )]
+    validation_runs: usize,
+
+    #[arg(
+        long,
+        help = "Max extraction attempts for --valid-only before giving up (default: 10x count)"
+    )]
+    max_attempts: Option<usize>,
 }
 
 impl ExtractCommand {
@@ -134,6 +155,12 @@ impl ExtractCommand {
 
         if self.count == 0 {
             return Err(anyhow::anyhow!("--count must be at least 1"));
+        }
+
+        if self.valid_only && self.dry_run {
+            return Err(anyhow::anyhow!(
+                "Cannot use both --valid-only and --dry-run"
+            ));
         }
 
         if !self.quiet {
@@ -168,8 +195,8 @@ impl ExtractCommand {
             return self.execute_dry_run(&extractor, &filter);
         }
 
-        // Handle smart selection mode
-        if self.smart_select || self.count > 1 {
+        // Handle smart selection mode (but not --valid-only without --smart-select)
+        if self.smart_select || (self.count > 1 && !self.valid_only) {
             return self.execute_smart_select(&extractor, &binary_info, &filter);
         }
 
@@ -180,6 +207,10 @@ impl ExtractCommand {
             println!("Database initialized: {}", self.database.display());
         }
 
+        if self.valid_only {
+            return self.execute_validated_single(&extractor, &binary_info, &filter, &mut db);
+        }
+
         let (start_addr, end_addr, assembly_block) = if let Some(range) = &self.range {
             if range.len() != 2 {
                 return Err(anyhow::anyhow!(
@@ -187,7 +218,6 @@ impl ExtractCommand {
                 ));
             }
 
-            // Parse the addresses - support both hex (0x...) and decimal
             let start_addr = Self::parse_address(&range[0])?;
             let end_addr = Self::parse_address(&range[1])?;
 
@@ -207,7 +237,6 @@ impl ExtractCommand {
         };
 
         if !self.quiet {
-            // Try to count instructions to show in output
             let instruction_count = if let Ok(cs) = extractor.create_capstone() {
                 cs.disasm_all(&assembly_block, start_addr)
                     .map(|insns| insns.len())
@@ -224,7 +253,6 @@ impl ExtractCommand {
                 instruction_count
             );
 
-            // Show filter match details in verbose mode
             if self.verbose && !filter.is_empty() {
                 if let Ok(filter_match) =
                     extractor.check_block_filter(&assembly_block, start_addr, &filter)
@@ -254,10 +282,14 @@ impl ExtractCommand {
             );
         }
 
-        db.store_extraction(&binary_info, start_addr, end_addr, &assembly_block)?;
+        let is_new = db.store_extraction(&binary_info, start_addr, end_addr, &assembly_block)?;
 
         if !self.quiet {
-            println!("✓ Extraction stored in database successfully");
+            if is_new {
+                println!("✓ Extraction stored in database successfully");
+            } else {
+                println!("Duplicate block, not stored");
+            }
         }
 
         Ok(())
@@ -440,6 +472,12 @@ impl ExtractCommand {
             None
         };
 
+        let mut simulator = if self.valid_only {
+            Some(Simulator::new()?)
+        } else {
+            None
+        };
+
         for _ in 0..candidate_count {
             let result = if !filter.is_empty() {
                 extractor.extract_filtered_block(filter)
@@ -448,9 +486,25 @@ impl ExtractCommand {
             };
 
             if let Ok((start_addr, end_addr, assembly_block)) = result {
-                // Disassemble and score
+                if self.valid_only {
+                    if let Some(ref mut sim) = simulator {
+                        if !self.validate_block_natively(
+                            &self.binary,
+                            binary_info,
+                            start_addr,
+                            end_addr,
+                            &assembly_block,
+                            sim,
+                        )? {
+                            if let Some(ref pb) = progress {
+                                pb.inc(1);
+                            }
+                            continue;
+                        }
+                    }
+                }
+
                 if let Ok(insns) = cs.disasm_all(&assembly_block, start_addr) {
-                    // Instructions derefs to &[Insn], so use &*insns
                     let score = complexity_analyzer.score_block(&insns);
                     let variety = complexity_analyzer.get_instruction_variety(&insns);
                     let has_problematic = complexity_analyzer.has_problematic_instructions(&insns);
@@ -497,7 +551,7 @@ impl ExtractCommand {
         // Store selected blocks and print report
         let mut total_instructions = HashSet::new();
         for (i, block) in selected.iter().enumerate() {
-            db.store_extraction(
+            let is_new = db.store_extraction(
                 binary_info,
                 block.start_addr,
                 block.end_addr,
@@ -506,7 +560,9 @@ impl ExtractCommand {
 
             total_instructions.extend(block.instruction_variety.iter().cloned());
 
-            if !self.quiet {
+            if !is_new && !self.quiet {
+                println!("\n  Block {}: duplicate, skipped", i + 1);
+            } else if !self.quiet {
                 println!(
                     "\n  Block {}: 0x{:08x} - 0x{:08x} ({} bytes, {} instructions)",
                     i + 1,
@@ -655,6 +711,228 @@ impl ExtractCommand {
             let line: Vec<_> = chunk.iter().map(|s| s.as_str()).collect();
             println!("  {}", line.join(", "));
         }
+    }
+
+    fn execute_validated_single(
+        &self,
+        extractor: &Extractor,
+        binary_info: &BinaryInfo,
+        filter: &ExtractionFilter,
+        db: &mut Database,
+    ) -> Result<()> {
+        let mut simulator = Simulator::new()?;
+        let mut rejected = 0;
+
+        // For --range, extract once and validate
+        if let Some(range) = &self.range {
+            if range.len() != 2 {
+                return Err(anyhow::anyhow!(
+                    "Range option requires exactly two addresses"
+                ));
+            }
+            let start_addr = Self::parse_address(&range[0])?;
+            let end_addr = Self::parse_address(&range[1])?;
+            let (start_addr, end_addr, assembly_block) =
+                extractor.extract_range(start_addr, end_addr)?;
+
+            if !self.quiet {
+                print!(
+                    "  Block 0x{:08x}-0x{:08x} ({} bytes) - validating... ",
+                    start_addr,
+                    end_addr,
+                    assembly_block.len()
+                );
+            }
+
+            if self.validate_block_natively(
+                &self.binary,
+                binary_info,
+                start_addr,
+                end_addr,
+                &assembly_block,
+                &mut simulator,
+            )? {
+                if !self.quiet {
+                    println!(
+                        "PASS ({}/{} runs)",
+                        self.validation_runs, self.validation_runs
+                    );
+                }
+                let is_new = db.store_extraction(binary_info, start_addr, end_addr, &assembly_block)?;
+                if !self.quiet {
+                    if is_new {
+                        println!("✓ Valid block stored in database");
+                    } else {
+                        println!("  Duplicate block, skipped");
+                    }
+                }
+            } else {
+                if !self.quiet {
+                    println!("FAIL");
+                }
+                return Err(anyhow::anyhow!(
+                    "Block at specified range failed native validation"
+                ));
+            }
+            return Ok(());
+        }
+
+        let blocks_needed = if self.smart_select || self.count > 1 {
+            self.count
+        } else {
+            1
+        };
+        let max_attempts = self.max_attempts.unwrap_or(blocks_needed * 10);
+        let mut stored = 0;
+
+        if !self.quiet {
+            println!(
+                "Extracting valid blocks (up to {} attempts, {} validation runs each)",
+                max_attempts, self.validation_runs
+            );
+        }
+
+        let mut attempt = 0;
+        let mut consecutive_dupes = 0;
+        let max_consecutive_dupes = 50;
+
+        while stored < blocks_needed && attempt < max_attempts {
+            attempt += 1;
+
+            let result = if !filter.is_empty() {
+                extractor.extract_filtered_block(filter)
+            } else {
+                extractor.extract_random_aligned_block()
+            };
+
+            let (start_addr, end_addr, assembly_block) = match result {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            if !self.quiet {
+                print!(
+                    "  Attempt {}: block 0x{:08x}-0x{:08x} ({} bytes) - validating... ",
+                    attempt,
+                    start_addr,
+                    end_addr,
+                    assembly_block.len()
+                );
+            }
+
+            if self.validate_block_natively(
+                &self.binary,
+                binary_info,
+                start_addr,
+                end_addr,
+                &assembly_block,
+                &mut simulator,
+            )? {
+                if !self.quiet {
+                    println!(
+                        "PASS ({}/{} runs)",
+                        self.validation_runs, self.validation_runs
+                    );
+                }
+                let is_new = db.store_extraction(binary_info, start_addr, end_addr, &assembly_block)?;
+                if is_new {
+                    stored += 1;
+                    consecutive_dupes = 0;
+                    if !self.quiet {
+                        println!("  Stored as block #{}", stored);
+                    }
+                } else {
+                    consecutive_dupes += 1;
+                    if !self.quiet {
+                        println!("  Duplicate block, skipped");
+                    }
+                    if consecutive_dupes >= max_consecutive_dupes {
+                        if !self.quiet {
+                            println!(
+                                "\nStopping: {} consecutive duplicates suggests no more unique blocks match the filters",
+                                max_consecutive_dupes
+                            );
+                        }
+                        break;
+                    }
+                }
+            } else {
+                if !self.quiet {
+                    println!("FAIL");
+                }
+                rejected += 1;
+            }
+        }
+
+        if !self.quiet {
+            println!();
+            if stored > 0 {
+                println!(
+                    "Extraction complete: {} valid block(s) found ({} rejected)",
+                    stored, rejected
+                );
+            } else {
+                println!(
+                    "Extraction failed: no valid blocks found after {} attempts ({} rejected)",
+                    max_attempts, rejected
+                );
+            }
+        }
+
+        if stored == 0 {
+            Err(anyhow::anyhow!(
+                "No valid blocks found after {} attempts",
+                max_attempts
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn validate_block_natively(
+        &self,
+        binary_path: &Path,
+        binary_info: &BinaryInfo,
+        start_addr: u64,
+        end_addr: u64,
+        assembly_block: &[u8],
+        simulator: &mut Simulator,
+    ) -> Result<bool> {
+        use crate::db::ExtractionInfo;
+
+        let analyzer = Analyzer::new(&binary_info.architecture);
+        let analysis = match analyzer.analyze_block(assembly_block, start_addr) {
+            Ok(a) => a,
+            Err(_) => return Ok(false),
+        };
+
+        let temp_extraction = ExtractionInfo {
+            id: 0,
+            binary_path: binary_path.to_string_lossy().to_string(),
+            binary_hash: binary_info.hash.clone(),
+            binary_format: binary_info.format.clone(),
+            binary_architecture: binary_info.architecture.clone(),
+            binary_base_address: binary_info.base_address,
+            start_address: start_addr,
+            end_address: end_addr,
+            assembly_block: assembly_block.to_vec(),
+            created_at: String::new(),
+            analysis_status: "analyzed".to_string(),
+            analysis_results: None,
+        };
+
+        for _ in 0..self.validation_runs {
+            match simulator.simulate_block(&temp_extraction, &analysis, None, false) {
+                Ok(result) => {
+                    if result.exit_code != 0 {
+                        return Ok(false);
+                    }
+                }
+                Err(_) => return Ok(false),
+            }
+        }
+
+        Ok(true)
     }
 }
 

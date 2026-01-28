@@ -87,7 +87,8 @@ impl Database {
                 end_address INTEGER NOT NULL,
                 assembly_block BLOB NOT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (binary_id) REFERENCES binaries(id)
+                FOREIGN KEY (binary_id) REFERENCES binaries(id),
+                UNIQUE(binary_id, start_address, end_address)
             )",
             [],
         )?;
@@ -391,13 +392,14 @@ impl Database {
         Ok(())
     }
 
+    /// Returns `true` if a new extraction was stored, `false` if it was a duplicate.
     pub fn store_extraction(
         &mut self,
         binary_info: &BinaryInfo,
         start_addr: u64,
         end_addr: u64,
         assembly_block: &[u8],
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let tx = self.conn.transaction()?;
 
         let binary_id = {
@@ -428,8 +430,8 @@ impl Database {
             }
         };
 
-        tx.execute(
-            "INSERT INTO extractions (binary_id, start_address, end_address, assembly_block)
+        let rows = tx.execute(
+            "INSERT OR IGNORE INTO extractions (binary_id, start_address, end_address, assembly_block)
              VALUES (?1, ?2, ?3, ?4)",
             params![
                 binary_id,
@@ -440,7 +442,11 @@ impl Database {
         )?;
 
         tx.commit()?;
-        Ok(())
+        if rows == 0 {
+            Ok(false)
+        } else {
+            Ok(true)
+        }
     }
 
     pub fn list_extractions(&self) -> Result<Vec<ExtractionInfo>> {
@@ -464,7 +470,7 @@ impl Database {
              FROM extractions e
              JOIN binaries b ON e.binary_id = b.id
              LEFT JOIN analyses a ON e.id = a.extraction_id
-             ORDER BY e.created_at DESC",
+             ORDER BY e.id ASC",
         )?;
 
         let extractions = stmt
