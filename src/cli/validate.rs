@@ -7,7 +7,8 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use crate::arch::{
-    get_effective_architecture, EmulatorDispatcher, ExecutionTarget, FlagComparison,
+    flags::X86Flags, get_effective_architecture, EmulatorDispatcher, ExecutionTarget,
+    FlagComparison,
 };
 use crate::cli::block_range::BlockRange;
 use crate::config::Config;
@@ -61,6 +62,13 @@ pub struct ValidateCommand {
 
     #[arg(long, help = "Show flag-by-flag breakdown")]
     pub flag_detail: bool,
+
+    #[arg(
+        long,
+        value_delimiter = ',',
+        help = "Ignore specific flags in comparison (e.g., --ignore-flags AF,CF)"
+    )]
+    pub ignore_flags: Vec<String>,
 
     #[arg(long, help = "Stop on first validation failure")]
     pub stop_on_failure: bool,
@@ -161,9 +169,16 @@ impl ComparisonResult {
         self.exit_codes_match && self.flags_match && self.registers_match && self.memory_match
     }
 
-    fn compare(native: &FinalState, fex: &FinalState, native_exit: i32, fex_exit: i32) -> Self {
+    fn compare(
+        native: &FinalState,
+        fex: &FinalState,
+        native_exit: i32,
+        fex_exit: i32,
+        ignore_flags_mask: u64,
+    ) -> Self {
         let exit_codes_match = native_exit == fex_exit;
-        let flags_match = native.flags == fex.flags;
+        let flags_match =
+            (native.flags & !ignore_flags_mask) == (fex.flags & !ignore_flags_mask);
 
         let mut register_differences = Vec::new();
         let mut registers_match = true;
@@ -221,6 +236,26 @@ impl ComparisonResult {
 }
 
 impl ValidateCommand {
+    fn build_ignore_flags_mask(flag_names: &[String]) -> Result<u64> {
+        let mut mask = 0u64;
+        for name in flag_names {
+            let bit = match name.to_uppercase().as_str() {
+                "CF" => X86Flags::CF_BIT,
+                "PF" => X86Flags::PF_BIT,
+                "AF" => X86Flags::AF_BIT,
+                "ZF" => X86Flags::ZF_BIT,
+                "SF" => X86Flags::SF_BIT,
+                "TF" => X86Flags::TF_BIT,
+                "IF" => X86Flags::IF_BIT,
+                "DF" => X86Flags::DF_BIT,
+                "OF" => X86Flags::OF_BIT,
+                _ => return Err(anyhow!("Unknown flag: '{}'. Valid flags: CF, PF, AF, ZF, SF, TF, IF, DF, OF", name)),
+            };
+            mask |= 1 << bit;
+        }
+        Ok(mask)
+    }
+
     pub fn execute(self) -> Result<()> {
         // Check if database exists
         if !self.database.exists() {
@@ -236,6 +271,12 @@ impl ValidateCommand {
         // Validate command-line flags
         if self.native_only && self.fex_only {
             return Err(anyhow!("Cannot specify both --native-only and --fex-only"));
+        }
+
+        let ignore_flags_mask = Self::build_ignore_flags_mask(&self.ignore_flags)?;
+        if ignore_flags_mask != 0 {
+            let ignored: Vec<&str> = self.ignore_flags.iter().map(|s| s.as_str()).collect();
+            println!("Ignoring flags: {}", ignored.join(", "));
         }
 
         // Load configuration
@@ -365,6 +406,7 @@ impl ValidateCommand {
                 SimulationResult,
                 ComparisonResult,
                 u64,
+                Option<PathBuf>,
             )> = None;
 
             let single_run = self.runs == 1;
@@ -594,6 +636,7 @@ impl ValidateCommand {
                         &fex.final_state,
                         native.exit_code,
                         fex.exit_code,
+                        ignore_flags_mask,
                     );
 
                     if comparison.is_pass() {
@@ -612,6 +655,7 @@ impl ValidateCommand {
                             fex_result.clone().unwrap(),
                             comparison,
                             run_seed,
+                            compiled_binary.clone(),
                         ));
 
                         if self.stop_on_failure {
@@ -640,7 +684,7 @@ impl ValidateCommand {
             if single_run {
                 println!();
 
-                if let Some((native, fex, comparison, _seed)) = last_failed_comparison.take() {
+                if let Some((native, fex, comparison, _seed, binary_path)) = last_failed_comparison.take() {
                     self.display_results(
                         &Some(native),
                         &Some(fex),
@@ -648,6 +692,9 @@ impl ValidateCommand {
                         &fex_target,
                         &Some(comparison),
                     );
+                    if let Some(ref path) = binary_path {
+                        println!("Binary: {}", path.display());
+                    }
                     total_blocks_failed += 1;
                     any_failure = true;
                     if !multiple_blocks {
@@ -675,7 +722,7 @@ impl ValidateCommand {
                 println!();
                 self.display_run_summary(&stats, &native_target, &fex_target);
 
-                if let Some((native, fex, comparison, seed)) = last_failed_comparison.take() {
+                if let Some((native, fex, comparison, seed, binary_path)) = last_failed_comparison.take() {
                     println!();
                     println!("First failure (seed {}):", seed);
                     self.display_results(
@@ -685,6 +732,9 @@ impl ValidateCommand {
                         &fex_target,
                         &Some(comparison),
                     );
+                    if let Some(ref path) = binary_path {
+                        println!("Binary: {}", path.display());
+                    }
                 }
 
                 if stats.failed > 0 {
