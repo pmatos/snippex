@@ -69,6 +69,10 @@ struct Cli {
     #[arg(short = 'V', long = "version")]
     version: bool,
 
+    /// Enable verbose logging (shows INFO level messages)
+    #[arg(short, long, global = true)]
+    verbose: bool,
+
     /// Override host architecture for testing (x86_64 or aarch64)
     #[arg(long = "arch", global = true, value_parser = parse_arch)]
     arch_override: Option<arch::HostArch>,
@@ -116,8 +120,11 @@ enum Commands {
 }
 
 fn main() -> Result<()> {
-    // Initialize logging with INFO level by default
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    let cli = Cli::parse();
+
+    // Initialize logging: warn level by default, info if --verbose
+    let log_level = if cli.verbose { "info" } else { "warn" };
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(log_level)).init();
 
     // Create global cleanup registry for remote operations
     let cleanup_registry = Arc::new(remote::CleanupRegistry::new());
@@ -130,8 +137,6 @@ fn main() -> Result<()> {
         std::process::exit(130); // Exit code 130 for SIGINT
     })
     .expect("Error setting Ctrl+C handler");
-
-    let cli = Cli::parse();
 
     // Set architecture override if provided
     if let Some(arch_override) = cli.arch_override {
