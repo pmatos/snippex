@@ -46,6 +46,14 @@ cargo build --release
 
 The binary will be available at `target/release/snippex`.
 
+## Global Options
+
+These options are available on all commands:
+
+- `--verbose, -v`: Enable verbose logging (shows INFO level messages; default log level is warn)
+- `--arch <ARCH>`: Override host architecture for testing (`x86_64` or `aarch64`)
+- `--version, -V`: Print version information including host architecture
+
 ## Usage
 
 ### Extract Command
@@ -60,6 +68,37 @@ snippex extract <binary_path> [OPTIONS]
 
 - `--verbose, -v`: Enable detailed logging output
 - `--database, -d <path>`: Specify database file (default: `snippex.db`)
+- `--range <START> <END>`: Extract from specific address range
+- `--min-size <BYTES>`: Minimum block size in bytes
+- `--max-size <BYTES>`: Maximum block size in bytes
+- `--count <N>`: Number of blocks to extract (default: 1)
+
+#### Block Filtering
+
+Filter extracted blocks by instruction characteristics:
+
+- `--has-memory-access`: Only blocks with memory access instructions
+- `--no-memory-access`: Only blocks without memory access instructions
+- `--has-control-flow`: Only blocks with control flow (jumps, calls, returns)
+- `--no-control-flow`: Only blocks without control flow
+- `--instruction-types <TYPES>`: Filter by instruction categories (comma-separated: `general`, `fpu`, `sse`, `avx`, `avx512`, `branch`, `syscall`)
+- `--dry-run`: Preview filter effectiveness without extracting (shows match rate)
+
+#### Smart Selection
+
+Select blocks using strategies beyond random:
+
+- `--smart-select`: Enable smart block selection based on instruction complexity
+- `--select-strategy <STRATEGY>`: `random` (default), `diverse` (maximize variety), `complex` (maximize complexity)
+- `--selection-report`: Show detailed report explaining why blocks were chosen
+
+#### Validated Extraction
+
+Only keep blocks that execute successfully:
+
+- `--valid-only`: Simulates each block and only keeps ones that execute natively
+- `--validation-runs <N>`: Number of native simulation runs for validation (default: 5)
+- `--max-attempts <N>`: Max extraction attempts before giving up (default: 10× count)
 
 #### What Gets Stored
 
@@ -207,6 +246,21 @@ Formula: sandbox_addr = 0x10000000 + (original_addr - binary_base)
 
 This preserves relative offsets, which is critical for RIP-relative addressing used in modern x86-64 code.
 
+### Disasm Command
+
+Show disassembly of a block with color-coded analysis:
+
+```bash
+# Disassemble block #1
+snippex disasm 1
+
+# Show raw bytes alongside disassembly
+snippex disasm 1 --bytes
+
+# Without colors (for piping)
+snippex disasm 1 --no-color
+```
+
 ### Simulate Command
 
 Run simulations on extracted assembly blocks:
@@ -215,11 +269,23 @@ Run simulations on extracted assembly blocks:
 # Simulate block #1 natively
 snippex simulate 1
 
-# Simulate with verbose output
-snippex simulate 1 --verbose
+# Simulate with multiple runs
+snippex simulate 1 --runs 100
 
 # Simulate with FEX-Emu (on ARM64)
 snippex simulate 1 --emulator fex-emu
+
+# Simulate on a remote machine
+snippex simulate 1 --remote x86-server
+
+# Keep generated assembly and binary files for debugging
+snippex simulate 1 --keep-files
+
+# Use a specific seed for reproducibility
+snippex simulate 1 --seed 42
+
+# Stop on first failure
+snippex simulate all --stop-on-failure
 ```
 
 ### What Gets Loaded
@@ -310,6 +376,30 @@ snippex config remove x86-server
 snippex config validate
 ```
 
+### Emulate Command
+
+Replay stored native simulations through FEX-Emu and compare results:
+
+```bash
+# Emulate block #1
+snippex emulate 1
+
+# Emulate a range of blocks
+snippex emulate 1-10
+
+# Show flag-by-flag breakdown on mismatch
+snippex emulate 1 --flag-detail
+
+# Show all register values (not just differences)
+snippex emulate 1 --show-all-registers
+
+# Emulate a specific simulation by ID
+snippex emulate 1 --simulation-id <UUID>
+
+# Stop on first mismatch
+snippex emulate all --stop-on-failure
+```
+
 ### Validate Command
 
 The `validate` command provides unified cross-architecture validation. It automatically detects the host architecture and dispatches simulations to appropriate targets:
@@ -332,6 +422,15 @@ snippex validate 1 --seed 12345
 
 # Skip cache and force re-execution
 snippex validate 1 --no-cache
+
+# Show flag-by-flag breakdown
+snippex validate 1 --flag-detail
+
+# Ignore specific flags in comparison
+snippex validate 1 --ignore-flags AF,CF
+
+# Use transfer cache to skip redundant binary uploads
+snippex validate 1 --use-transfer-cache
 ```
 
 #### How Validation Works
@@ -363,6 +462,15 @@ snippex validate-batch 1-50 --stop-on-failure
 
 # Output as JSON
 snippex validate-batch 1-20 --output-json
+
+# Export results to CSV
+snippex validate-batch all --export-csv results.csv
+
+# Append to existing CSV
+snippex validate-batch 1-10 --export-csv results.csv --csv-append
+
+# Parallel execution
+snippex validate-batch all --parallel --threads 4
 ```
 
 ### Result Caching
@@ -504,6 +612,96 @@ snippex compare 1 --emulators native,fex-emu
 ```
 
 This workflow enables systematic testing of FEX-Emu compatibility and performance against native execution.
+
+### Statistics
+
+View and analyze batch validation statistics:
+
+```bash
+# Overall summary
+snippex stats summary
+
+# Pass rate trends over time
+snippex stats trends
+
+# List recent batch runs
+snippex stats runs
+
+# List consistently failing blocks
+snippex stats failing
+
+# List intermittently failing (flaky) blocks
+snippex stats flaky
+
+# Failure mode distribution
+snippex stats modes
+```
+
+### Reporting
+
+Create GitHub issues from validation failures:
+
+```bash
+snippex report github <BLOCK_ID>
+```
+
+### Metrics
+
+Track and display validation metrics over time:
+
+```bash
+# Record a metrics snapshot
+snippex metrics record
+
+# Display metrics summary
+snippex metrics show
+
+# Export to JSON or CSV
+snippex metrics export --format json
+
+# Export in Prometheus format
+snippex metrics prometheus
+```
+
+### Regression Testing
+
+Track and detect behavior changes across FEX-Emu versions:
+
+```bash
+# Record current results as baseline
+snippex regression record
+
+# Test against baseline
+snippex regression test
+
+# Update baseline with current results
+snippex regression update
+
+# Show regression history
+snippex regression history
+
+# Export/import baselines for sharing
+snippex regression export --output baseline.json
+snippex regression import baseline.json
+```
+
+### Remote Setup
+
+Cross-compile and deploy snippex to a remote machine:
+
+```bash
+# Deploy to a configured remote
+snippex remote-setup arm64-fex
+
+# Force rebuild
+snippex remote-setup arm64-fex --force-rebuild
+
+# Use an existing binary instead of cross-compiling
+snippex remote-setup arm64-fex --use-existing /path/to/binary
+
+# Dry run
+snippex remote-setup arm64-fex --dry-run
+```
 
 ## Shell Completions
 
