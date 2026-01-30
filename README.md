@@ -637,13 +637,19 @@ snippex stats flaky
 snippex stats modes
 ```
 
-### Reporting
+### GitHub Issue Creation
 
-Create GitHub issues from validation failures:
+Automatically create GitHub issues for validation failures:
 
 ```bash
-snippex report github <BLOCK_ID>
+# Create issues for failures during validation
+snippex validate 1-100 --create-issue
+
+# Specify a different repository
+snippex validate 1 --create-issue --issue-repo FEX-Emu/FEX
 ```
+
+Requires `GITHUB_TOKEN` environment variable with a personal access token.
 
 ### Metrics
 

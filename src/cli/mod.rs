@@ -15,7 +15,7 @@ pub mod metrics;
 pub mod regression;
 pub mod remote_setup;
 pub mod remove;
-pub mod report;
+
 pub mod simulate;
 pub mod simulate_remote;
 pub mod stats;

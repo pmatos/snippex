@@ -159,6 +159,58 @@ impl EmulatorConfig {
         None
     }
 
+    pub fn get_version(&self) -> String {
+        match self {
+            EmulatorConfig::Native => "native".to_string(),
+            EmulatorConfig::Qemu { binary, .. } => std::process::Command::new(binary)
+                .arg("--version")
+                .output()
+                .ok()
+                .and_then(|o| {
+                    let out = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    if out.is_empty() {
+                        None
+                    } else {
+                        Some(out.lines().next().unwrap_or("").to_string())
+                    }
+                })
+                .unwrap_or_else(|| "unknown".to_string()),
+            EmulatorConfig::FexEmu { binary, .. } => {
+                // Try --version first, then -v
+                for flag in &["--version", "-v"] {
+                    if let Ok(output) = std::process::Command::new(binary).arg(flag).output() {
+                        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                        let text = if stdout.is_empty() { &stderr } else { &stdout };
+                        if !text.is_empty() {
+                            return text.lines().next().unwrap_or("").to_string();
+                        }
+                    }
+                }
+                "unknown".to_string()
+            }
+        }
+    }
+
+    pub fn get_version_via_ssh(host: &str, fex_path: Option<&str>) -> String {
+        let binary = fex_path.unwrap_or("FEXInterpreter");
+        for flag in &["--version", "-v"] {
+            let cmd = format!("{} {}", binary, flag);
+            if let Ok(output) = std::process::Command::new("ssh")
+                .args([host, &cmd])
+                .output()
+            {
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                let text = if stdout.is_empty() { &stderr } else { &stdout };
+                if !text.is_empty() {
+                    return text.lines().next().unwrap_or("").to_string();
+                }
+            }
+        }
+        "unknown".to_string()
+    }
+
     pub fn is_available(&self) -> bool {
         match self {
             EmulatorConfig::Native => true,

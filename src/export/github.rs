@@ -11,6 +11,7 @@ use crate::simulator::SimulationResult;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Write;
+use std::path::PathBuf;
 
 /// Configuration for GitHub issue creation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +56,18 @@ pub struct IssueData {
     pub host_info: HostInfo,
     /// Additional notes or context
     pub notes: Option<String>,
+    /// Plain-text disassembly of the block
+    pub disassembly: Option<String>,
+    /// FEX-Emu version string
+    pub fex_version: Option<String>,
+    /// Contents of FEX-Emu Config.json
+    pub fex_config: Option<String>,
+    /// Path to compiled test binary
+    pub binary_path: Option<PathBuf>,
+    /// Seed that triggered the failure
+    pub seed: Option<u64>,
+    /// URL to gist containing the binary
+    pub gist_url: Option<String>,
 }
 
 /// Template for GitHub issue creation.
@@ -92,14 +105,29 @@ impl GitHubClient {
         Self::new(GitHubConfig::default())
     }
 
-    /// Gets the personal access token from the environment.
+    /// Gets the personal access token from the environment or config file.
     fn get_token(&self) -> Result<String, String> {
-        std::env::var(&self.config.token_env_var).map_err(|_| {
-            format!(
-                "GitHub token not found. Set the {} environment variable with a personal access token.",
-                self.config.token_env_var
-            )
-        })
+        // Try environment variable first
+        if let Ok(token) = std::env::var(&self.config.token_env_var) {
+            return Ok(token);
+        }
+
+        // Fall back to config file
+        if let Ok(config) = crate::config::Config::load() {
+            if let Some(token) = config.github_token {
+                return Ok(token);
+            }
+        }
+
+        Err(format!(
+            "GitHub token not found. Either:\n\
+             • Set the {} environment variable, or\n\
+             • Add 'github_token: \"ghp_...\"' to your config file ({})",
+            self.config.token_env_var,
+            crate::config::Config::default_path()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "~/.config/snippex/config.yml".to_string())
+        ))
     }
 
     /// Creates a new issue on GitHub.
@@ -288,6 +316,31 @@ impl GitHubClient {
     }
 }
 
+/// Reads FEX-Emu Config.json from local filesystem.
+pub fn read_fex_config_local() -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    let path = format!("{}/.fex-emu/Config.json", home);
+    std::fs::read_to_string(&path).ok()
+}
+
+/// Reads FEX-Emu Config.json from a remote host via SSH.
+pub fn read_fex_config_ssh(host: &str) -> Option<String> {
+    let output = std::process::Command::new("ssh")
+        .args([host, "cat", "~/.fex-emu/Config.json"])
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let content = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if content.is_empty() {
+            None
+        } else {
+            Some(content)
+        }
+    } else {
+        None
+    }
+}
+
 /// Generates a unique signature for an issue to detect duplicates.
 pub fn generate_issue_signature(extraction: &ExtractionInfo, differences: &[String]) -> String {
     use sha2::{Digest, Sha256};
@@ -368,8 +421,11 @@ pub fn build_issue_body(data: &IssueData) -> String {
     writeln!(body, "<summary>Click to expand disassembly</summary>").unwrap();
     writeln!(body).unwrap();
     writeln!(body, "```asm").unwrap();
-    // Note: Actual disassembly would be added here by the caller
-    writeln!(body, "; (Disassembly would be inserted here)").unwrap();
+    if let Some(ref disasm) = data.disassembly {
+        write!(body, "{}", disasm).unwrap();
+    } else {
+        writeln!(body, "; (Disassembly not available)").unwrap();
+    }
     writeln!(body, "```").unwrap();
     writeln!(body).unwrap();
     writeln!(body, "</details>").unwrap();
@@ -468,33 +524,40 @@ pub fn build_issue_body(data: &IssueData) -> String {
     writeln!(body, "</details>").unwrap();
     writeln!(body).unwrap();
 
+    // Test Binary (gist link)
+    if let Some(ref gist_url) = data.gist_url {
+        writeln!(body, "## Test Binary").unwrap();
+        writeln!(body).unwrap();
+        writeln!(
+            body,
+            "The compiled test binary (base64-encoded) is available as a Gist: {}",
+            gist_url
+        )
+        .unwrap();
+        writeln!(body).unwrap();
+    } else if let Some(ref binary_path) = data.binary_path {
+        writeln!(body, "## Test Binary").unwrap();
+        writeln!(body).unwrap();
+        writeln!(body, "Binary path (local): `{}`", binary_path.display()).unwrap();
+        writeln!(body).unwrap();
+    }
+
     // Reproduction Steps
     writeln!(body, "## Reproduction").unwrap();
     writeln!(body).unwrap();
-    writeln!(body, "To reproduce this issue:").unwrap();
-    writeln!(body).unwrap();
-    writeln!(body, "1. Extract the block from the database:").unwrap();
-    writeln!(body, "   ```bash").unwrap();
-    writeln!(
-        body,
-        "   snippex show --id <extraction_id> --format nasm > block.asm"
-    )
-    .unwrap();
-    writeln!(body, "   ```").unwrap();
-    writeln!(body).unwrap();
-    writeln!(body, "2. Run native simulation:").unwrap();
-    writeln!(body, "   ```bash").unwrap();
-    writeln!(body, "   snippex simulate --id <extraction_id>").unwrap();
-    writeln!(body, "   ```").unwrap();
-    writeln!(body).unwrap();
-    writeln!(body, "3. Run FEX-Emu simulation:").unwrap();
-    writeln!(body, "   ```bash").unwrap();
-    writeln!(
-        body,
-        "   snippex simulate --id <extraction_id> --emulator fex"
-    )
-    .unwrap();
-    writeln!(body, "   ```").unwrap();
+    if let Some(seed) = data.seed {
+        writeln!(body, "To reproduce this failure:").unwrap();
+        writeln!(body).unwrap();
+        writeln!(body, "```bash").unwrap();
+        writeln!(body, "snippex validate <block> --seed {}", seed).unwrap();
+        writeln!(body, "```").unwrap();
+    } else {
+        writeln!(body, "To reproduce this issue:").unwrap();
+        writeln!(body).unwrap();
+        writeln!(body, "```bash").unwrap();
+        writeln!(body, "snippex validate <block>").unwrap();
+        writeln!(body, "```").unwrap();
+    }
     writeln!(body).unwrap();
 
     // Environment
@@ -506,7 +569,23 @@ pub fn build_issue_body(data: &IssueData) -> String {
     writeln!(body, "| OS | {} |", data.host_info.os).unwrap();
     writeln!(body, "| Kernel | {} |", data.host_info.kernel).unwrap();
     writeln!(body, "| Machine ID | {} |", data.host_info.machine_id).unwrap();
+    if let Some(ref fex_version) = data.fex_version {
+        writeln!(body, "| FEX-Emu Version | {} |", fex_version).unwrap();
+    }
     writeln!(body).unwrap();
+
+    // FEX Configuration (collapsible)
+    if let Some(ref fex_config) = data.fex_config {
+        writeln!(body, "<details>").unwrap();
+        writeln!(body, "<summary>FEX-Emu Configuration</summary>").unwrap();
+        writeln!(body).unwrap();
+        writeln!(body, "```json").unwrap();
+        writeln!(body, "{}", fex_config).unwrap();
+        writeln!(body, "```").unwrap();
+        writeln!(body).unwrap();
+        writeln!(body, "</details>").unwrap();
+        writeln!(body).unwrap();
+    }
 
     // Signature
     let differences = collect_all_differences(data);
@@ -835,6 +914,12 @@ mod tests {
             fex_result: fex,
             host_info: HostInfo::current(),
             notes: None,
+            disassembly: Some("0x00001000: mov      rbx, rax\n".to_string()),
+            fex_version: Some("FEX-2501".to_string()),
+            fex_config: Some("{\"SMC\": \"mman\"}".to_string()),
+            binary_path: None,
+            seed: Some(12345),
+            gist_url: None,
         };
 
         let body = build_issue_body(&data);
@@ -843,8 +928,74 @@ mod tests {
         assert!(body.contains("## Block Information"));
         assert!(body.contains("## State Comparison"));
         assert!(body.contains("## Reproduction"));
+        assert!(body.contains("--seed 12345"));
         assert!(body.contains("## Environment"));
+        assert!(body.contains("FEX-2501"));
+        assert!(body.contains("FEX-Emu Configuration"));
+        assert!(body.contains("mov      rbx, rax"));
         assert!(body.contains("Issue signature:"));
+    }
+
+    #[test]
+    fn test_build_issue_body_with_gist() {
+        let extraction = create_test_extraction();
+        let initial = create_test_initial_state(100, 200);
+        let native_final = create_test_final_state(101, 200, 0);
+        let fex_final = create_test_final_state(102, 200, 0);
+
+        let native = create_test_result(initial.clone(), native_final);
+        let fex = create_test_result(initial, fex_final);
+
+        let data = IssueData {
+            extraction,
+            analysis: None,
+            native_result: native,
+            fex_result: fex,
+            host_info: HostInfo::current(),
+            notes: None,
+            disassembly: None,
+            fex_version: None,
+            fex_config: None,
+            binary_path: None,
+            seed: None,
+            gist_url: Some("https://gist.github.com/user/abc123".to_string()),
+        };
+
+        let body = build_issue_body(&data);
+        assert!(body.contains("## Test Binary"));
+        assert!(body.contains("https://gist.github.com/user/abc123"));
+    }
+
+    #[test]
+    fn test_build_issue_body_no_optional_fields() {
+        let extraction = create_test_extraction();
+        let initial = create_test_initial_state(100, 200);
+        let native_final = create_test_final_state(101, 200, 0);
+        let fex_final = create_test_final_state(102, 200, 0);
+
+        let native = create_test_result(initial.clone(), native_final);
+        let fex = create_test_result(initial, fex_final);
+
+        let data = IssueData {
+            extraction,
+            analysis: None,
+            native_result: native,
+            fex_result: fex,
+            host_info: HostInfo::current(),
+            notes: None,
+            disassembly: None,
+            fex_version: None,
+            fex_config: None,
+            binary_path: None,
+            seed: None,
+            gist_url: None,
+        };
+
+        let body = build_issue_body(&data);
+        assert!(body.contains("Disassembly not available"));
+        assert!(!body.contains("FEX-Emu Configuration"));
+        assert!(!body.contains("## Test Binary"));
+        assert!(body.contains("snippex validate <block>"));
     }
 
     #[test]

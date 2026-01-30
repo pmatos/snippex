@@ -30,7 +30,7 @@ use cli::metrics::MetricsCommand;
 use cli::regression::RegressionCommand;
 use cli::remote_setup::RemoteSetupCommand;
 use cli::remove::RemoveCommand;
-use cli::report::ReportCommand;
+
 use cli::simulate::SimulateCommand;
 use cli::simulate_remote::SimulateRemoteCommand;
 use cli::stats::StatsCommand;
@@ -107,8 +107,7 @@ enum Commands {
     Config(ConfigCommand),
     Cache(CacheCommand),
     Stats(StatsCommand),
-    /// Create GitHub issues from validation failures
-    Report(ReportCommand),
+
     /// Track and display validation metrics over time
     Metrics(MetricsCommand),
     /// Generate shell completion scripts
@@ -176,7 +175,7 @@ fn main() -> Result<()> {
         Commands::Config(cmd) => cmd.execute(),
         Commands::Cache(cmd) => cmd.execute(),
         Commands::Stats(cmd) => cmd.execute(),
-        Commands::Report(cmd) => cmd.execute(),
+
         Commands::Metrics(cmd) => cmd.execute(),
         Commands::Completions(cmd) => cmd.execute(),
         Commands::Regression(cmd) => cmd.execute(),

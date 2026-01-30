@@ -6,6 +6,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use crate::analyzer::disassemble_to_string;
 use crate::arch::{
     flags::X86Flags, get_effective_architecture, EmulatorDispatcher, ExecutionTarget,
     FlagComparison,
@@ -13,6 +14,10 @@ use crate::arch::{
 use crate::cli::block_range::BlockRange;
 use crate::config::Config;
 use crate::db::{CachedValidationResult, Database};
+use crate::export::github::{
+    read_fex_config_local, read_fex_config_ssh, GitHubClient, GitHubConfig, IssueData,
+};
+use crate::export::{AnalysisData, HostInfo};
 use crate::remote::{ExecutionPackage, RemoteOrchestrator};
 use crate::simulator::{
     EmulatorConfig, FinalState, InitialState, RandomStateGenerator, SimulationResult, Simulator,
@@ -78,6 +83,16 @@ pub struct ValidateCommand {
         help = "Use transfer cache to skip redundant binary uploads to remote (default: off for single validation)"
     )]
     pub use_transfer_cache: bool,
+
+    #[arg(long, help = "Create GitHub issue for each validation failure")]
+    pub create_issue: bool,
+
+    #[arg(
+        long,
+        default_value = "pmatos/snippex",
+        help = "Repository for --create-issue (owner/repo)"
+    )]
+    pub issue_repo: String,
 }
 
 /// Represents the result of validating a block against both native and FEX-Emu.
@@ -654,6 +669,14 @@ impl ValidateCommand {
                         if !single_run {
                             println!("✗ FAIL");
                         }
+                        // Keep binary for issue creation
+                        if self.create_issue {
+                            if let Some(ref path) = compiled_binary {
+                                // Ensure binary isn't cleaned up
+                                let _ = path;
+                            }
+                        }
+
                         last_failed_comparison = Some((
                             native_result.clone().unwrap(),
                             fex_result.clone().unwrap(),
@@ -688,18 +711,30 @@ impl ValidateCommand {
             if single_run {
                 println!();
 
-                if let Some((native, fex, comparison, _seed, binary_path)) =
+                if let Some((native, fex, comparison, seed, binary_path)) =
                     last_failed_comparison.take()
                 {
                     self.display_results(
-                        &Some(native),
-                        &Some(fex),
+                        &Some(native.clone()),
+                        &Some(fex.clone()),
                         &native_target,
                         &fex_target,
                         &Some(comparison),
                     );
                     if let Some(ref path) = binary_path {
                         println!("Binary: {}", path.display());
+                    }
+                    if self.create_issue {
+                        let analysis_ref = db.load_block_analysis(extraction.id).ok().flatten();
+                        self.create_github_issue(
+                            extraction,
+                            analysis_ref.as_ref(),
+                            &native,
+                            &fex,
+                            seed,
+                            binary_path.as_deref(),
+                            &fex_target,
+                        );
                     }
                     total_blocks_failed += 1;
                     any_failure = true;
@@ -734,14 +769,26 @@ impl ValidateCommand {
                     println!();
                     println!("First failure (seed {}):", seed);
                     self.display_results(
-                        &Some(native),
-                        &Some(fex),
+                        &Some(native.clone()),
+                        &Some(fex.clone()),
                         &native_target,
                         &fex_target,
                         &Some(comparison),
                     );
                     if let Some(ref path) = binary_path {
                         println!("Binary: {}", path.display());
+                    }
+                    if self.create_issue {
+                        let analysis_ref = db.load_block_analysis(extraction.id).ok().flatten();
+                        self.create_github_issue(
+                            extraction,
+                            analysis_ref.as_ref(),
+                            &native,
+                            &fex,
+                            seed,
+                            binary_path.as_deref(),
+                            &fex_target,
+                        );
                     }
                 }
 
@@ -1078,6 +1125,161 @@ impl ValidateCommand {
         }
 
         println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    }
+}
+
+impl ValidateCommand {
+    #[allow(clippy::too_many_arguments)]
+    fn create_github_issue(
+        &self,
+        extraction: &crate::db::ExtractionInfo,
+        analysis: Option<&crate::analyzer::BlockAnalysis>,
+        native_result: &SimulationResult,
+        fex_result: &SimulationResult,
+        seed: u64,
+        binary_path: Option<&std::path::Path>,
+        fex_target: &ExecutionTarget,
+    ) {
+        // Get disassembly
+        let disassembly = disassemble_to_string(
+            &extraction.assembly_block,
+            &extraction.binary_architecture,
+            extraction.start_address,
+        )
+        .ok();
+
+        // Get FEX version - from remote if FEX runs remotely
+        let fex_version = match fex_target {
+            ExecutionTarget::Remote(rc) => Some(EmulatorConfig::get_version_via_ssh(
+                &format!("{}@{}", rc.user, rc.host),
+                rc.fex_path.as_deref(),
+            )),
+            ExecutionTarget::Local => {
+                let fex_path = fex_target
+                    .remote_config()
+                    .and_then(|rc| rc.fex_path.as_deref());
+                let emulator = EmulatorConfig::fex_emu_with_optional_path(fex_path);
+                Some(emulator.get_version())
+            }
+            _ => None,
+        };
+
+        // Get FEX config - from remote if FEX runs remotely
+        let fex_config = match fex_target {
+            ExecutionTarget::Remote(rc) => read_fex_config_ssh(&format!("{}@{}", rc.user, rc.host)),
+            ExecutionTarget::Local => read_fex_config_local(),
+            _ => None,
+        };
+
+        let analysis_data = analysis.map(AnalysisData::from);
+
+        // Upload binary as gist if available
+        let gist_url = if let Some(path) = binary_path {
+            self.upload_binary_as_gist(path, extraction, seed)
+        } else {
+            None
+        };
+
+        let issue_data = IssueData {
+            extraction: extraction.clone(),
+            analysis: analysis_data,
+            native_result: native_result.clone(),
+            fex_result: fex_result.clone(),
+            host_info: HostInfo::current(),
+            notes: None,
+            disassembly,
+            fex_version,
+            fex_config,
+            binary_path: binary_path.map(|p| p.to_path_buf()),
+            seed: Some(seed),
+            gist_url,
+        };
+
+        let github_config = GitHubConfig {
+            repository: self.issue_repo.clone(),
+            ..GitHubConfig::default()
+        };
+
+        let client = GitHubClient::new(github_config);
+
+        let rt = match tokio::runtime::Runtime::new() {
+            Ok(rt) => rt,
+            Err(e) => {
+                eprintln!("Failed to create async runtime for issue creation: {}", e);
+                return;
+            }
+        };
+
+        match rt.block_on(async { client.create_or_update(&issue_data).await }) {
+            Ok((created_issue, is_new)) => {
+                if is_new {
+                    println!(
+                        "  Created issue #{}: {}",
+                        created_issue.number, created_issue.url
+                    );
+                } else {
+                    println!(
+                        "  Updated issue #{}: {}",
+                        created_issue.number, created_issue.url
+                    );
+                }
+            }
+            Err(e) => {
+                eprintln!("  Failed to create GitHub issue: {}", e);
+            }
+        }
+    }
+
+    fn upload_binary_as_gist(
+        &self,
+        binary_path: &std::path::Path,
+        extraction: &crate::db::ExtractionInfo,
+        seed: u64,
+    ) -> Option<String> {
+        use base64::Engine;
+
+        let binary_data = std::fs::read(binary_path).ok()?;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&binary_data);
+
+        let token = std::env::var("GITHUB_TOKEN")
+            .ok()
+            .or_else(|| {
+                crate::config::Config::load()
+                    .ok()
+                    .and_then(|c| c.github_token)
+            })?;
+        let filename = format!(
+            "block_{:x}_{:x}_seed_{}.bin.b64",
+            extraction.start_address, extraction.end_address, seed
+        );
+
+        let rt = tokio::runtime::Runtime::new().ok()?;
+        let octocrab = octocrab::OctocrabBuilder::new()
+            .personal_token(token)
+            .build()
+            .ok()?;
+
+        let result = rt.block_on(async {
+            let gist = octocrab
+                .gists()
+                .create()
+                .description(format!(
+                    "snippex test binary - block 0x{:x}-0x{:x} seed {}",
+                    extraction.start_address, extraction.end_address, seed
+                ))
+                .file(filename, encoded)
+                .send()
+                .await;
+            gist
+        });
+
+        match result {
+            Ok(gist) => Some(gist.html_url.to_string()),
+            Err(e) => {
+                eprintln!("  Failed to upload binary as gist: {}", e);
+                None
+            }
+        }
     }
 }
 

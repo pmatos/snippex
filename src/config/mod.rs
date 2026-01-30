@@ -54,6 +54,10 @@ pub struct Config {
     /// Default settings that apply when not overridden
     #[serde(default)]
     pub defaults: DefaultSettings,
+
+    /// GitHub personal access token (alternative to GITHUB_TOKEN env var)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github_token: Option<String>,
 }
 
 /// Configuration for a remote machine.
