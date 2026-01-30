@@ -1252,12 +1252,17 @@ impl ValidateCommand {
             extraction.start_address, extraction.end_address, seed
         );
 
-        let octocrab = octocrab::OctocrabBuilder::new()
-            .personal_token(token)
-            .build()
-            .ok()?;
-
         let result = rt.block_on(async {
+            let octocrab = match octocrab::OctocrabBuilder::new()
+                .personal_token(token)
+                .build()
+            {
+                Ok(o) => o,
+                Err(e) => {
+                    eprintln!("  Failed to create GitHub client: {}", e);
+                    return Err(e);
+                }
+            };
             let gist = octocrab
                 .gists()
                 .create()
