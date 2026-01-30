@@ -1241,13 +1241,11 @@ impl ValidateCommand {
         let binary_data = std::fs::read(binary_path).ok()?;
         let encoded = base64::engine::general_purpose::STANDARD.encode(&binary_data);
 
-        let token = std::env::var("GITHUB_TOKEN")
-            .ok()
-            .or_else(|| {
-                crate::config::Config::load()
-                    .ok()
-                    .and_then(|c| c.github_token)
-            })?;
+        let token = std::env::var("GITHUB_TOKEN").ok().or_else(|| {
+            crate::config::Config::load()
+                .ok()
+                .and_then(|c| c.github_token)
+        })?;
         let filename = format!(
             "block_{:x}_{:x}_seed_{}.bin.b64",
             extraction.start_address, extraction.end_address, seed

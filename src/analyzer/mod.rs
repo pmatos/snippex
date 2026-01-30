@@ -715,6 +715,47 @@ impl Analyzer {
     }
 }
 
+/// Disassemble raw bytes into a plain-text string (no color).
+pub fn disassemble_to_string(block: &[u8], arch: &str, start_addr: u64) -> Result<String> {
+    let cs = match arch {
+        "x86_64" => Capstone::new()
+            .x86()
+            .mode(arch::x86::ArchMode::Mode64)
+            .syntax(arch::x86::ArchSyntax::Intel)
+            .detail(true)
+            .build()
+            .map_err(|e| anyhow!("Failed to create disassembler: {}", e))?,
+        "i386" | "x86" => Capstone::new()
+            .x86()
+            .mode(arch::x86::ArchMode::Mode32)
+            .syntax(arch::x86::ArchSyntax::Intel)
+            .detail(true)
+            .build()
+            .map_err(|e| anyhow!("Failed to create disassembler: {}", e))?,
+        _ => return Err(anyhow!("Unsupported architecture: {}", arch)),
+    };
+
+    let insns = cs
+        .disasm_all(block, start_addr)
+        .map_err(|e| anyhow!("Disassembly failed: {}", e))?;
+
+    use std::fmt::Write;
+    let mut output = String::new();
+    for insn in insns.iter() {
+        let mnemonic = insn.mnemonic().unwrap_or("???");
+        let op_str = insn.op_str().unwrap_or("");
+        writeln!(
+            output,
+            "0x{:08x}: {:<8} {}",
+            insn.address(),
+            mnemonic,
+            op_str
+        )
+        .unwrap();
+    }
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -801,45 +842,4 @@ mod tests {
         let result = super::disassemble_to_string(&bytes, "arm", 0);
         assert!(result.is_err());
     }
-}
-
-/// Disassemble raw bytes into a plain-text string (no color).
-pub fn disassemble_to_string(block: &[u8], arch: &str, start_addr: u64) -> Result<String> {
-    let cs = match arch {
-        "x86_64" => Capstone::new()
-            .x86()
-            .mode(arch::x86::ArchMode::Mode64)
-            .syntax(arch::x86::ArchSyntax::Intel)
-            .detail(true)
-            .build()
-            .map_err(|e| anyhow!("Failed to create disassembler: {}", e))?,
-        "i386" | "x86" => Capstone::new()
-            .x86()
-            .mode(arch::x86::ArchMode::Mode32)
-            .syntax(arch::x86::ArchSyntax::Intel)
-            .detail(true)
-            .build()
-            .map_err(|e| anyhow!("Failed to create disassembler: {}", e))?,
-        _ => return Err(anyhow!("Unsupported architecture: {}", arch)),
-    };
-
-    let insns = cs
-        .disasm_all(block, start_addr)
-        .map_err(|e| anyhow!("Disassembly failed: {}", e))?;
-
-    use std::fmt::Write;
-    let mut output = String::new();
-    for insn in insns.iter() {
-        let mnemonic = insn.mnemonic().unwrap_or("???");
-        let op_str = insn.op_str().unwrap_or("");
-        writeln!(
-            output,
-            "0x{:08x}: {:<8} {}",
-            insn.address(),
-            mnemonic,
-            op_str
-        )
-        .unwrap();
-    }
-    Ok(output)
 }
