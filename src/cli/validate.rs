@@ -1173,9 +1173,17 @@ impl ValidateCommand {
 
         let analysis_data = analysis.map(AnalysisData::from);
 
+        let rt = match tokio::runtime::Runtime::new() {
+            Ok(rt) => rt,
+            Err(e) => {
+                eprintln!("Failed to create async runtime for issue creation: {}", e);
+                return;
+            }
+        };
+
         // Upload binary as gist if available
         let gist_url = if let Some(path) = binary_path {
-            self.upload_binary_as_gist(path, extraction, seed)
+            self.upload_binary_as_gist(&rt, path, extraction, seed)
         } else {
             None
         };
@@ -1202,14 +1210,6 @@ impl ValidateCommand {
 
         let client = GitHubClient::new(github_config);
 
-        let rt = match tokio::runtime::Runtime::new() {
-            Ok(rt) => rt,
-            Err(e) => {
-                eprintln!("Failed to create async runtime for issue creation: {}", e);
-                return;
-            }
-        };
-
         match rt.block_on(async { client.create_or_update(&issue_data).await }) {
             Ok((created_issue, is_new)) => {
                 if is_new {
@@ -1232,6 +1232,7 @@ impl ValidateCommand {
 
     fn upload_binary_as_gist(
         &self,
+        rt: &tokio::runtime::Runtime,
         binary_path: &std::path::Path,
         extraction: &crate::db::ExtractionInfo,
         seed: u64,
@@ -1251,7 +1252,6 @@ impl ValidateCommand {
             extraction.start_address, extraction.end_address, seed
         );
 
-        let rt = tokio::runtime::Runtime::new().ok()?;
         let octocrab = octocrab::OctocrabBuilder::new()
             .personal_token(token)
             .build()
