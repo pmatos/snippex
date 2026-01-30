@@ -32,7 +32,7 @@ impl Default for GitHubConfig {
             repository: "FEX-Emu/FEX".to_string(),
             labels: vec![
                 "bug".to_string(),
-                "snippex".to_string(),
+                "fex-emu".to_string(),
                 "needs-triage".to_string(),
             ],
             assignees: vec![],
@@ -1003,6 +1003,6 @@ mod tests {
         let config = GitHubConfig::default();
         assert_eq!(config.repository, "FEX-Emu/FEX");
         assert!(config.labels.contains(&"bug".to_string()));
-        assert!(config.labels.contains(&"snippex".to_string()));
+        assert!(config.labels.contains(&"fex-emu".to_string()));
     }
 }

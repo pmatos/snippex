@@ -176,15 +176,19 @@ impl EmulatorConfig {
                 })
                 .unwrap_or_else(|| "unknown".to_string()),
             EmulatorConfig::FexEmu { binary, .. } => {
-                // Try --version first, then -v
-                for flag in &["--version", "-v"] {
-                    if let Ok(output) = std::process::Command::new(binary).arg(flag).output() {
-                        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                        let text = if stdout.is_empty() { &stderr } else { &stdout };
-                        if !text.is_empty() {
-                            return text.lines().next().unwrap_or("").to_string();
-                        }
+                // FEXInterpreter doesn't support --version; use FEXServer --version instead
+                let fex_dir = std::path::Path::new(binary).parent();
+                let fex_server = fex_dir
+                    .map(|d| d.join("FEXServer").to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "FEXServer".to_string());
+                if let Ok(output) =
+                    std::process::Command::new(&fex_server).arg("--version").output()
+                {
+                    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    let text = if stdout.is_empty() { &stderr } else { &stdout };
+                    if !text.is_empty() {
+                        return text.lines().next().unwrap_or("").to_string();
                     }
                 }
                 "unknown".to_string()
@@ -193,19 +197,26 @@ impl EmulatorConfig {
     }
 
     pub fn get_version_via_ssh(host: &str, fex_path: Option<&str>) -> String {
-        let binary = fex_path.unwrap_or("FEXInterpreter");
-        for flag in &["--version", "-v"] {
-            let cmd = format!("{} {}", binary, flag);
-            if let Ok(output) = std::process::Command::new("ssh")
-                .args([host, &cmd])
-                .output()
-            {
-                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                let text = if stdout.is_empty() { &stderr } else { &stdout };
-                if !text.is_empty() {
-                    return text.lines().next().unwrap_or("").to_string();
-                }
+        // FEXInterpreter doesn't support --version; use FEXServer --version instead
+        let fex_server = match fex_path {
+            Some(path) => {
+                let p = std::path::Path::new(path);
+                p.parent()
+                    .map(|d| d.join("FEXServer").to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "FEXServer".to_string())
+            }
+            None => "FEXServer".to_string(),
+        };
+        let cmd = format!("{} --version", fex_server);
+        if let Ok(output) = std::process::Command::new("ssh")
+            .args([host, &cmd])
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let text = if stdout.is_empty() { &stderr } else { &stdout };
+            if !text.is_empty() {
+                return text.lines().next().unwrap_or("").to_string();
             }
         }
         "unknown".to_string()
