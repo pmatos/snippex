@@ -181,8 +181,9 @@ impl EmulatorConfig {
                 let fex_server = fex_dir
                     .map(|d| d.join("FEXServer").to_string_lossy().into_owned())
                     .unwrap_or_else(|| "FEXServer".to_string());
-                if let Ok(output) =
-                    std::process::Command::new(&fex_server).arg("--version").output()
+                if let Ok(output) = std::process::Command::new(&fex_server)
+                    .arg("--version")
+                    .output()
                 {
                     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
                     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
