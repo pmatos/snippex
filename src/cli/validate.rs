@@ -75,8 +75,11 @@ pub struct ValidateCommand {
     )]
     pub ignore_flags: Vec<String>,
 
-    #[arg(long, help = "Stop on first validation failure")]
+    #[arg(long, help = "Stop on first validation failure within a block's runs")]
     pub stop_on_failure: bool,
+
+    #[arg(long, help = "Stop after the first block that has any validation failure")]
+    pub fail_fast: bool,
 
     #[arg(
         long,
@@ -809,6 +812,12 @@ impl ValidateCommand {
 
             if multiple_blocks {
                 println!();
+            }
+
+            if self.fail_fast && any_failure {
+                println!("Stopping due to --fail-fast");
+                println!();
+                break;
             }
         }
 
