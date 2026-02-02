@@ -86,6 +86,79 @@ mod simulator_tests {
     }
 
     #[test]
+    fn test_assembly_generator_32bit() {
+        let generator = AssemblyGenerator::for_target(crate::simulator::TargetArch::I386);
+        let mut extraction = create_mock_extraction();
+        extraction.binary_architecture = "i386".to_string();
+        extraction.assembly_block = vec![0x40, 0x90]; // inc eax; nop
+        let analysis = create_mock_analysis();
+
+        let mut initial_state = InitialState::new();
+        initial_state.set_register("rax", 0x12345678);
+        initial_state.set_register("rbx", 0xdeadbeef);
+
+        let result =
+            generator.generate_simulation_file(&extraction, &analysis, &initial_state, None);
+
+        assert!(result.is_ok());
+        let assembly = result.unwrap();
+
+        assert!(assembly.contains("BITS 32"));
+        assert!(assembly.contains("mov eax, 0x12345678"));
+        assert!(assembly.contains("mov ebx, 0xdeadbeef"));
+        assert!(assembly.contains("int 0x80"));
+        assert!(assembly.contains("pushfd"));
+        assert!(!assembly.contains("syscall"));
+        assert!(!assembly.contains("BITS 64"));
+    }
+
+    #[test]
+    fn test_final_state_parsing_32bit() {
+        let mut output = vec![0u8; 4096];
+
+        // 8 GPRs × 4 bytes at offset 0
+        let test_eax = 0x12345678u32;
+        let test_ebx = 0xdeadbeefu32;
+        output[0..4].copy_from_slice(&test_eax.to_le_bytes());
+        output[4..8].copy_from_slice(&test_ebx.to_le_bytes());
+
+        // Flags at offset 32 (4 bytes)
+        let test_flags = 0x246u32;
+        output[32..36].copy_from_slice(&test_flags.to_le_bytes());
+
+        let result =
+            FinalState::parse_from_output_for_arch(&output, crate::simulator::TargetArch::I386);
+        assert!(result.is_ok());
+
+        let final_state = result.unwrap();
+        assert_eq!(final_state.get_register("eax"), Some(test_eax as u64));
+        assert_eq!(final_state.get_register("ebx"), Some(test_ebx as u64));
+        assert_eq!(final_state.flags, test_flags as u64);
+    }
+
+    #[test]
+    fn test_target_arch_parse() {
+        use crate::simulator::TargetArch;
+        assert_eq!(TargetArch::parse("i386"), TargetArch::I386);
+        assert_eq!(TargetArch::parse("i686"), TargetArch::I386);
+        assert_eq!(TargetArch::parse("x86"), TargetArch::I386);
+        assert_eq!(TargetArch::parse("x86_64"), TargetArch::X86_64);
+        assert_eq!(TargetArch::parse("X86_64"), TargetArch::X86_64);
+    }
+
+    #[test]
+    fn test_compilation_pipeline_i386() {
+        match CompilationPipeline::for_target("i386") {
+            Ok(pipeline) => {
+                assert_eq!(pipeline.target_arch, "i386");
+            }
+            Err(e) => {
+                assert!(e.to_string().contains("NASM") || e.to_string().contains("ld"));
+            }
+        }
+    }
+
+    #[test]
     fn test_final_state_parsing() {
         // Create a mock output buffer
         let mut output = vec![0u8; 4096];

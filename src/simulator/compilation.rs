@@ -11,6 +11,7 @@ pub struct CompilationPipeline {
     pub nasm_path: PathBuf,
     pub ld_path: PathBuf,
     pub temp_dir: TempDir,
+    pub target_arch: String,
 }
 
 impl CompilationPipeline {
@@ -60,6 +61,7 @@ impl CompilationPipeline {
             nasm_path,
             ld_path,
             temp_dir,
+            target_arch: target_arch.to_string(),
         })
     }
 
@@ -156,8 +158,12 @@ impl CompilationPipeline {
     }
 
     fn assemble_with_nasm(&self, asm_file: &Path, obj_file: &Path) -> Result<()> {
+        let format = match self.target_arch.as_str() {
+            "i386" | "i686" | "x86" => "elf32",
+            _ => "elf64",
+        };
         let output = Command::new(&self.nasm_path)
-            .args(["-f", "elf64"])
+            .args(["-f", format])
             .arg("-o")
             .arg(obj_file)
             .arg(asm_file)
@@ -184,7 +190,14 @@ impl CompilationPipeline {
     }
 
     fn link_with_ld(&self, obj_file: &Path, binary_file: &Path) -> Result<()> {
-        let output = Command::new(&self.ld_path)
+        let mut cmd = Command::new(&self.ld_path);
+        match self.target_arch.as_str() {
+            "i386" | "i686" | "x86" => {
+                cmd.args(["-m", "elf_i386"]);
+            }
+            _ => {}
+        }
+        let output = cmd
             .arg("-o")
             .arg(binary_file)
             .arg(obj_file)

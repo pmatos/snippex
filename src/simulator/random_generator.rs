@@ -3,6 +3,7 @@ use rand::{Rng, SeedableRng};
 
 use super::sandbox::SANDBOX_BASE;
 use super::state::InitialState;
+use super::TargetArch;
 use crate::analyzer::{BlockAnalysis, MemoryAccess, PointerRegisterUsage};
 
 /// Base address for dynamically allocated pointer buffers within the sandbox.
@@ -19,6 +20,7 @@ pub struct RandomStateGenerator {
     rng: StdRng,
     /// Next available address for buffer allocation
     next_buffer_addr: u64,
+    target_arch: TargetArch,
 }
 
 impl Default for RandomStateGenerator {
@@ -32,6 +34,15 @@ impl RandomStateGenerator {
         Self {
             rng: StdRng::from_rng(&mut rand::rng()),
             next_buffer_addr: POINTER_BUFFER_BASE,
+            target_arch: TargetArch::X86_64,
+        }
+    }
+
+    pub fn for_target(arch: TargetArch) -> Self {
+        Self {
+            rng: StdRng::from_rng(&mut rand::rng()),
+            next_buffer_addr: POINTER_BUFFER_BASE,
+            target_arch: arch,
         }
     }
 
@@ -39,6 +50,7 @@ impl RandomStateGenerator {
         Self {
             rng: StdRng::seed_from_u64(seed),
             next_buffer_addr: POINTER_BUFFER_BASE,
+            target_arch: TargetArch::X86_64,
         }
     }
 
@@ -131,33 +143,54 @@ impl RandomStateGenerator {
     }
 
     fn generate_register_value(&mut self, register: &str) -> u64 {
+        if self.target_arch.is_32bit() {
+            return self.generate_register_value_32(register);
+        }
         match register {
-            // Stack pointer should be in a reasonable range
             "rsp" | "esp" => {
-                let base = 0x7ffd00000000u64; // Typical user stack base
-                let offset = self.rng.random_range(0x1000..0x10000); // 4KB to 64KB offset
+                let base = 0x7ffd00000000u64;
+                let offset = self.rng.random_range(0x1000..0x10000);
                 base + offset
             }
-            // Frame pointer should be close to stack pointer
             "rbp" | "ebp" => {
                 let base = 0x7ffd00000000u64;
                 let offset = self.rng.random_range(0x1000..0x10000);
                 base + offset
             }
-            // General purpose registers can be any value, but avoid problematic ones
             _ => {
                 let mut value = self.rng.random::<u64>();
-
-                // Avoid NULL pointers and very small values that might cause issues
                 if value < 0x1000 {
                     value += 0x1000;
                 }
-
-                // Avoid kernel space addresses on x86_64
                 if value >= 0xffff800000000000 {
                     value &= 0x7fffffffffffffff;
                 }
+                value
+            }
+        }
+    }
 
+    fn generate_register_value_32(&mut self, register: &str) -> u64 {
+        match register {
+            "rsp" | "esp" => {
+                let base = 0x7ffd0000u64;
+                let offset = self.rng.random_range(0x1000u64..0x10000u64);
+                base + offset
+            }
+            "rbp" | "ebp" => {
+                let base = 0x7ffd0000u64;
+                let offset = self.rng.random_range(0x1000u64..0x10000u64);
+                base + offset
+            }
+            _ => {
+                let mut value = self.rng.random::<u32>() as u64;
+                if value < 0x1000 {
+                    value += 0x1000;
+                }
+                // Avoid kernel space (above 0xC0000000) on 32-bit Linux
+                if value >= 0xC0000000 {
+                    value &= 0x7FFFFFFF;
+                }
                 value
             }
         }
@@ -173,14 +206,22 @@ impl RandomStateGenerator {
     }
 
     fn estimate_memory_address(&mut self, memory_access: &MemoryAccess) -> Option<u64> {
-        if memory_access.is_stack {
-            // Stack addresses
+        if self.target_arch.is_32bit() {
+            if memory_access.is_stack {
+                let base = 0x7ffd0000u64;
+                let offset = self.rng.random_range(0x1000..0x10000);
+                Some(base + offset)
+            } else {
+                let base = 0x08048000u64;
+                let offset = self.rng.random_range(0x1000..0x100000);
+                Some(base + offset)
+            }
+        } else if memory_access.is_stack {
             let base = 0x7ffd00000000u64;
             let offset = self.rng.random_range(0x1000..0x10000);
             Some(base + offset)
         } else {
-            // Heap or other memory addresses
-            let base = 0x555555554000u64; // Typical heap base
+            let base = 0x555555554000u64;
             let offset = self.rng.random_range(0x1000..0x100000);
             Some(base + offset)
         }

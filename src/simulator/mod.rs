@@ -17,6 +17,52 @@ use uuid::Uuid;
 use crate::analyzer::BlockAnalysis;
 use crate::db::ExtractionInfo;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetArch {
+    X86_64,
+    I386,
+}
+
+impl TargetArch {
+    pub fn parse(arch: &str) -> Self {
+        match arch.to_lowercase().as_str() {
+            "i386" | "i686" | "x86" => TargetArch::I386,
+            _ => TargetArch::X86_64,
+        }
+    }
+
+    pub fn is_32bit(self) -> bool {
+        self == TargetArch::I386
+    }
+
+    pub fn bits_directive(self) -> &'static str {
+        if self.is_32bit() {
+            "BITS 32"
+        } else {
+            "BITS 64"
+        }
+    }
+
+    /// Map 64-bit register name to 32-bit equivalent (for analyzer normalization)
+    pub fn map_register_name(self, reg: &str) -> &str {
+        if !self.is_32bit() {
+            return reg;
+        }
+        match reg {
+            "rax" => "eax",
+            "rbx" => "ebx",
+            "rcx" => "ecx",
+            "rdx" => "edx",
+            "rsi" => "esi",
+            "rdi" => "edi",
+            "rbp" => "ebp",
+            "rsp" => "esp",
+            "r8" | "r9" | "r10" | "r11" | "r12" | "r13" | "r14" | "r15" => reg,
+            _ => reg,
+        }
+    }
+}
+
 pub use assembly_generator::AssemblyGenerator;
 pub use compilation::CompilationPipeline;
 pub use emulator::EmulatorConfig;
@@ -66,6 +112,7 @@ pub struct Simulator {
     pub compilation_pipeline: CompilationPipeline,
     pub execution_harness: ExecutionHarness,
     pub random_generator: RandomStateGenerator,
+    pub target_arch: TargetArch,
 }
 
 impl Simulator {
@@ -74,11 +121,13 @@ impl Simulator {
     }
 
     pub fn for_target(target_arch: &str) -> crate::error::Result<Self> {
+        let arch = TargetArch::parse(target_arch);
         Ok(Self {
-            assembly_generator: AssemblyGenerator::new(),
+            assembly_generator: AssemblyGenerator::for_target(arch),
             compilation_pipeline: CompilationPipeline::for_target(target_arch)?,
             execution_harness: ExecutionHarness::new(),
-            random_generator: RandomStateGenerator::new(),
+            random_generator: RandomStateGenerator::for_target(arch),
+            target_arch: arch,
         })
     }
 
@@ -154,7 +203,10 @@ impl Simulator {
             .execute_binary(&binary_path, emulator.as_ref())?;
 
         // Parse final state from execution output
-        let final_state = FinalState::parse_from_output(&execution_result.output_data)?;
+        let final_state = FinalState::parse_from_output_for_arch(
+            &execution_result.output_data,
+            self.target_arch,
+        )?;
 
         // Clean up files if not keeping them
         let (assembly_file_path, binary_file_path) = if keep_files {
@@ -281,7 +333,10 @@ impl Simulator {
             .execute_binary(binary_path, emulator.as_ref())?;
 
         // Parse final state from execution output
-        let final_state = FinalState::parse_from_output(&execution_result.output_data)?;
+        let final_state = FinalState::parse_from_output_for_arch(
+            &execution_result.output_data,
+            self.target_arch,
+        )?;
 
         Ok(SimulationResult::new(
             initial_state.clone(),

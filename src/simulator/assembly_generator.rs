@@ -1,5 +1,6 @@
 use super::sandbox::SandboxMemoryLayout;
 use super::state::InitialState;
+use super::TargetArch;
 use crate::analyzer::BlockAnalysis;
 use crate::db::ExtractionInfo;
 use crate::error::{Error, Result};
@@ -11,8 +12,7 @@ const POINTER_BUFFER_BASE: u64 = super::sandbox::SANDBOX_BASE + 0x0800_0000;
 const POINTER_BUFFER_END: u64 = super::sandbox::SANDBOX_BASE + super::sandbox::SANDBOX_SIZE;
 
 pub struct AssemblyGenerator {
-    #[allow(dead_code)]
-    pub target_arch: String,
+    pub target_arch: TargetArch,
 }
 
 impl Default for AssemblyGenerator {
@@ -24,8 +24,12 @@ impl Default for AssemblyGenerator {
 impl AssemblyGenerator {
     pub fn new() -> Self {
         Self {
-            target_arch: "x86_64".to_string(),
+            target_arch: TargetArch::X86_64,
         }
+    }
+
+    pub fn for_target(arch: TargetArch) -> Self {
+        Self { target_arch: arch }
     }
 
     pub fn generate_simulation_file(
@@ -50,7 +54,8 @@ impl AssemblyGenerator {
         assembly.push('\n');
 
         // Assembly directives
-        assembly.push_str("BITS 64\n");
+        assembly.push_str(self.target_arch.bits_directive());
+        assembly.push('\n');
         assembly.push_str("SECTION .data\n");
         assembly.push_str("    ; Output buffer for register/memory state\n");
         assembly.push_str(&format!(
@@ -80,6 +85,7 @@ impl AssemblyGenerator {
         sandbox: Option<&SandboxMemoryLayout>,
     ) -> Result<String> {
         let mut preamble = String::new();
+        let is_32 = self.target_arch.is_32bit();
 
         preamble.push_str("    ; === PREAMBLE: Set up initial state ===\n");
 
@@ -89,103 +95,114 @@ impl AssemblyGenerator {
             preamble.push_str(&mmap_code);
         }
 
-        // Set up registers - handle vector registers specially
-        // Vector registers (XMM/YMM/ZMM) can't use "mov reg, imm" - must go through GPR
-        // Initialize vector registers FIRST (using rax as scratch), then GPRs
-        // This ensures rax gets its correct final value if it's a live-in register
+        if is_32 {
+            // 32-bit: no vector registers, map 64-bit names to 32-bit
+            let mut gpr_regs: Vec<_> = initial_state.registers.iter().collect();
+            // Sort so eax is initialized last
+            gpr_regs.sort_by(|(a, _), (b, _)| {
+                let a_is_rax = *a == "rax" || *a == "eax";
+                let b_is_rax = *b == "rax" || *b == "eax";
+                a_is_rax.cmp(&b_is_rax)
+            });
 
-        let vector_regs: Vec<_> = initial_state
-            .registers
-            .iter()
-            .filter(|(r, _)| r.starts_with("xmm") || r.starts_with("ymm") || r.starts_with("zmm"))
-            .collect();
-        let mut gpr_regs: Vec<_> = initial_state
-            .registers
-            .iter()
-            .filter(|(r, _)| {
-                !r.starts_with("xmm") && !r.starts_with("ymm") && !r.starts_with("zmm")
-            })
-            .collect();
+            for (reg, value) in &gpr_regs {
+                let reg32 = self.target_arch.map_register_name(reg);
+                let val32 = *value & 0xFFFFFFFF;
+                preamble.push_str(&format!("    mov {reg32}, 0x{val32:08x}\n"));
+            }
 
-        // Sort GPRs to ensure rax is initialized last (in case it was clobbered by vector init)
-        gpr_regs.sort_by(|(a, _), (b, _)| {
-            let a_is_rax = *a == "rax";
-            let b_is_rax = *b == "rax";
-            a_is_rax.cmp(&b_is_rax) // false < true, so rax comes last
-        });
+            // Set up stack values (32-bit)
+            for (i, value) in initial_state.stack_setup.iter().enumerate() {
+                let offset = (i + 1) * 4;
+                let val32 = *value & 0xFFFFFFFF;
+                preamble.push_str(&format!("    mov dword [esp-{offset}], 0x{val32:08x}\n"));
+            }
+        } else {
+            // 64-bit path (unchanged)
+            let vector_regs: Vec<_> = initial_state
+                .registers
+                .iter()
+                .filter(|(r, _)| {
+                    r.starts_with("xmm") || r.starts_with("ymm") || r.starts_with("zmm")
+                })
+                .collect();
+            let mut gpr_regs: Vec<_> = initial_state
+                .registers
+                .iter()
+                .filter(|(r, _)| {
+                    !r.starts_with("xmm") && !r.starts_with("ymm") && !r.starts_with("zmm")
+                })
+                .collect();
 
-        // Initialize vector registers using rax as intermediate
-        for (reg, value) in &vector_regs {
-            preamble.push_str(&format!("    mov rax, 0x{value:016x}\n"));
-            if reg.starts_with("xmm") {
-                preamble.push_str(&format!("    movq {reg}, rax\n"));
-            } else {
-                // For YMM/ZMM, use vmovq with the corresponding XMM register
-                // VEX-encoded vmovq zeros the upper bits of YMM/ZMM automatically
-                let xmm_reg = reg.replace("ymm", "xmm").replace("zmm", "xmm");
-                preamble.push_str(&format!("    vmovq {xmm_reg}, rax\n"));
+            gpr_regs.sort_by(|(a, _), (b, _)| {
+                let a_is_rax = *a == "rax";
+                let b_is_rax = *b == "rax";
+                a_is_rax.cmp(&b_is_rax)
+            });
+
+            for (reg, value) in &vector_regs {
+                preamble.push_str(&format!("    mov rax, 0x{value:016x}\n"));
+                if reg.starts_with("xmm") {
+                    preamble.push_str(&format!("    movq {reg}, rax\n"));
+                } else {
+                    let xmm_reg = reg.replace("ymm", "xmm").replace("zmm", "xmm");
+                    preamble.push_str(&format!("    vmovq {xmm_reg}, rax\n"));
+                }
+            }
+
+            for (reg, value) in &gpr_regs {
+                preamble.push_str(&format!("    mov {reg}, 0x{value:016x}\n"));
+            }
+
+            for (i, value) in initial_state.stack_setup.iter().enumerate() {
+                let offset = (i + 1) * 8;
+                preamble.push_str(&format!("    mov qword [rsp-{offset}], 0x{value:016x}\n"));
             }
         }
 
-        // Initialize GPRs (rax last to restore it if it was clobbered)
-        for (reg, value) in &gpr_regs {
-            preamble.push_str(&format!("    mov {reg}, 0x{value:016x}\n"));
-        }
-
-        // Set up stack values
-        for (i, value) in initial_state.stack_setup.iter().enumerate() {
-            let offset = (i + 1) * 8;
-            preamble.push_str(&format!("    mov qword [rsp-{offset}], 0x{value:016x}\n"));
-        }
-
         // Set up memory locations with address translation
+        let addr_fmt_width = if is_32 { 8 } else { 16 };
         for (addr, data) in &initial_state.memory_locations {
-            // Check if address is already in sandbox range (e.g., pointer buffers)
-            // These addresses don't need translation - they're already valid
             use super::sandbox::{SANDBOX_BASE, SANDBOX_SIZE};
             let target_addr = if *addr >= SANDBOX_BASE && *addr < SANDBOX_BASE + SANDBOX_SIZE {
-                // Address is already in sandbox range (e.g., pointer register buffers)
                 *addr
             } else if let Some(sandbox) = sandbox {
-                // Translate original binary address to sandbox address
                 match sandbox.translate_to_sandbox(*addr) {
                     Ok(translated) => translated,
-                    Err(_) => {
-                        // Skip addresses that can't be translated - they're likely outside
-                        // the loaded binary sections (e.g., stack, heap, or invalid addresses)
-                        continue;
-                    }
+                    Err(_) => continue,
                 }
             } else {
-                // No sandbox and address not in sandbox range - skip
                 continue;
             };
 
             match data.len() {
                 1 => preamble.push_str(&format!(
-                    "    mov byte [0x{target_addr:016x}], 0x{:02x}\n",
-                    data[0]
+                    "    mov byte [0x{target_addr:0width$x}], 0x{:02x}\n",
+                    data[0],
+                    width = addr_fmt_width
                 )),
                 2 => preamble.push_str(&format!(
-                    "    mov word [0x{target_addr:016x}], 0x{:04x}\n",
-                    u16::from_le_bytes([data[0], data[1]])
+                    "    mov word [0x{target_addr:0width$x}], 0x{:04x}\n",
+                    u16::from_le_bytes([data[0], data[1]]),
+                    width = addr_fmt_width
                 )),
                 4 => preamble.push_str(&format!(
-                    "    mov dword [0x{target_addr:016x}], 0x{:08x}\n",
-                    u32::from_le_bytes([data[0], data[1], data[2], data[3]])
+                    "    mov dword [0x{target_addr:0width$x}], 0x{:08x}\n",
+                    u32::from_le_bytes([data[0], data[1], data[2], data[3]]),
+                    width = addr_fmt_width
                 )),
-                8 => preamble.push_str(&format!(
+                8 if !is_32 => preamble.push_str(&format!(
                     "    mov qword [0x{target_addr:016x}], 0x{:016x}\n",
                     u64::from_le_bytes([
                         data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]
                     ])
                 )),
                 _ => {
-                    // For larger data, write byte by byte
                     for (i, byte) in data.iter().enumerate() {
                         let byte_addr = target_addr + i as u64;
                         preamble.push_str(&format!(
-                            "    mov byte [0x{byte_addr:016x}], 0x{byte:02x}\n"
+                            "    mov byte [0x{byte_addr:0width$x}], 0x{byte:02x}\n",
+                            width = addr_fmt_width
                         ));
                     }
                 }
@@ -229,28 +246,47 @@ impl AssemblyGenerator {
 
         // If we have addresses to map, generate mmap syscall
         if let (Some(start), Some(end)) = (min_addr, max_addr) {
-            // Page-align the addresses
             let page_size: u64 = 0x1000;
             let aligned_start = (start / page_size) * page_size;
             let aligned_end = end.div_ceil(page_size) * page_size;
             let length = aligned_end - aligned_start;
 
             mmap_code.push_str("    ; Map pointer buffer memory region\n");
-            mmap_code.push_str("    mov rax, 9                    ; sys_mmap\n");
-            mmap_code.push_str(&format!("    mov rdi, 0x{aligned_start:016x} ; addr\n"));
-            mmap_code.push_str(&format!(
-                "    mov rsi, 0x{length:x}              ; length\n"
-            ));
-            mmap_code.push_str("    mov rdx, 3                    ; PROT_READ | PROT_WRITE\n");
-            mmap_code.push_str(
-                "    mov r10, 0x32                 ; MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED\n",
-            );
-            mmap_code.push_str(
-                "    xor r8, r8                    ; fd = 0 (will be ignored for anonymous)\n",
-            );
-            mmap_code.push_str("    sub r8, 1                     ; fd = -1\n");
-            mmap_code.push_str("    xor r9, r9                    ; offset = 0\n");
-            mmap_code.push_str("    syscall\n");
+
+            if self.target_arch.is_32bit() {
+                // i386: mmap2 via int 0x80
+                // eax=192 (mmap2), ebx=addr, ecx=len, edx=prot, esi=flags, edi=fd, ebp=offset_pages
+                mmap_code.push_str("    mov eax, 192                  ; sys_mmap2\n");
+                mmap_code.push_str(&format!(
+                    "    mov ebx, 0x{aligned_start:08x}       ; addr\n"
+                ));
+                mmap_code.push_str(&format!(
+                    "    mov ecx, 0x{length:x}              ; length\n"
+                ));
+                mmap_code.push_str("    mov edx, 3                    ; PROT_READ | PROT_WRITE\n");
+                mmap_code.push_str(
+                    "    mov esi, 0x32                 ; MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED\n",
+                );
+                mmap_code.push_str("    mov edi, 0xffffffff           ; fd = -1\n");
+                mmap_code.push_str("    xor ebp, ebp                  ; offset_pages = 0\n");
+                mmap_code.push_str("    int 0x80\n");
+            } else {
+                mmap_code.push_str("    mov rax, 9                    ; sys_mmap\n");
+                mmap_code.push_str(&format!("    mov rdi, 0x{aligned_start:016x} ; addr\n"));
+                mmap_code.push_str(&format!(
+                    "    mov rsi, 0x{length:x}              ; length\n"
+                ));
+                mmap_code.push_str("    mov rdx, 3                    ; PROT_READ | PROT_WRITE\n");
+                mmap_code.push_str(
+                    "    mov r10, 0x32                 ; MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED\n",
+                );
+                mmap_code.push_str(
+                    "    xor r8, r8                    ; fd = 0 (will be ignored for anonymous)\n",
+                );
+                mmap_code.push_str("    sub r8, 1                     ; fd = -1\n");
+                mmap_code.push_str("    xor r9, r9                    ; offset = 0\n");
+                mmap_code.push_str("    syscall\n");
+            }
             mmap_code.push('\n');
         }
 
@@ -317,11 +353,17 @@ impl AssemblyGenerator {
     }
 
     fn generate_epilogue(&self, _analysis: &BlockAnalysis) -> Result<String> {
+        if self.target_arch.is_32bit() {
+            return self.generate_epilogue_32();
+        }
+        self.generate_epilogue_64()
+    }
+
+    fn generate_epilogue_64(&self) -> Result<String> {
         let mut epilogue = String::new();
 
         epilogue.push_str("    ; === EPILOGUE: Capture final state ===\n");
 
-        // Store all registers to output buffer
         let registers = [
             "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "r8", "r9", "r10", "r11",
             "r12", "r13", "r14", "r15",
@@ -334,15 +376,11 @@ impl AssemblyGenerator {
             ));
         }
 
-        // Store flags
         epilogue.push_str("    pushfq\n");
         epilogue.push_str("    pop rax\n");
         epilogue.push_str("    mov qword [output_buffer + 128], rax\n");
 
-        // Store memory locations (we'll store them starting at offset 256)
         let mut memory_offset = 256;
-
-        // For now, we'll store stack values as a simple example
         for i in 1..=8 {
             let stack_offset = i * 8;
             epilogue.push_str(&format!("    mov rax, qword [rsp-{stack_offset}]\n"));
@@ -351,11 +389,10 @@ impl AssemblyGenerator {
                 "    mov qword [output_buffer + {}], 0x{:016x}\n",
                 memory_offset + 8,
                 8u64
-            )); // Size
+            ));
             memory_offset += 16;
         }
 
-        // Add end marker
         epilogue.push_str(&format!(
             "    mov qword [output_buffer + {memory_offset}], 0\n"
         ));
@@ -364,7 +401,6 @@ impl AssemblyGenerator {
             memory_offset + 8
         ));
 
-        // Write output buffer to stdout
         epilogue.push_str("    ; Write output buffer to stdout\n");
         epilogue.push_str("    mov rax, 1                    ; sys_write\n");
         epilogue.push_str("    mov rdi, 1                    ; stdout\n");
@@ -375,11 +411,74 @@ impl AssemblyGenerator {
         epilogue.push_str("    syscall\n");
         epilogue.push('\n');
 
-        // Exit cleanly
         epilogue.push_str("    ; Exit cleanly\n");
         epilogue.push_str("    mov rax, 60                   ; sys_exit\n");
         epilogue.push_str("    mov rdi, 0                    ; exit code\n");
         epilogue.push_str("    syscall\n");
+
+        Ok(epilogue)
+    }
+
+    fn generate_epilogue_32(&self) -> Result<String> {
+        let mut epilogue = String::new();
+
+        epilogue.push_str("    ; === EPILOGUE: Capture final state (32-bit) ===\n");
+
+        // Store 8 GPRs × 4 bytes = 32 bytes at offset 0
+        let registers = ["eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp"];
+
+        for (i, reg) in registers.iter().enumerate() {
+            let offset = i * 4;
+            epilogue.push_str(&format!(
+                "    mov dword [output_buffer + {offset}], {reg}\n"
+            ));
+        }
+
+        // Store flags (4 bytes at offset 32)
+        epilogue.push_str("    pushfd\n");
+        epilogue.push_str("    pop eax\n");
+        epilogue.push_str("    mov dword [output_buffer + 32], eax\n");
+
+        // Store stack values starting at offset 64, pairs of (value: dword, size: dword)
+        let mut memory_offset = 64;
+        for i in 1..=8 {
+            let stack_offset = i * 4;
+            epilogue.push_str(&format!("    mov eax, dword [esp-{stack_offset}]\n"));
+            epilogue.push_str(&format!(
+                "    mov dword [output_buffer + {memory_offset}], eax\n"
+            ));
+            epilogue.push_str(&format!(
+                "    mov dword [output_buffer + {}], 4\n",
+                memory_offset + 4
+            ));
+            memory_offset += 8;
+        }
+
+        // End marker
+        epilogue.push_str(&format!(
+            "    mov dword [output_buffer + {memory_offset}], 0\n"
+        ));
+        epilogue.push_str(&format!(
+            "    mov dword [output_buffer + {}], 0\n",
+            memory_offset + 4
+        ));
+
+        // sys_write via int 0x80: eax=4, ebx=fd, ecx=buf, edx=len
+        epilogue.push_str("    ; Write output buffer to stdout\n");
+        epilogue.push_str("    mov eax, 4                    ; sys_write\n");
+        epilogue.push_str("    mov ebx, 1                    ; stdout\n");
+        epilogue.push_str("    mov ecx, output_buffer        ; buffer\n");
+        epilogue.push_str(&format!(
+            "    mov edx, {OUTPUT_BUFFER_SIZE}                 ; length\n"
+        ));
+        epilogue.push_str("    int 0x80\n");
+        epilogue.push('\n');
+
+        // sys_exit via int 0x80: eax=1, ebx=code
+        epilogue.push_str("    ; Exit cleanly\n");
+        epilogue.push_str("    mov eax, 1                    ; sys_exit\n");
+        epilogue.push_str("    xor ebx, ebx                  ; exit code 0\n");
+        epilogue.push_str("    int 0x80\n");
 
         Ok(epilogue)
     }

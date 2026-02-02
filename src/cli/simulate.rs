@@ -112,11 +112,13 @@ impl SimulateCommand {
             None
         };
 
-        // Initialize simulator once
+        // Initialize simulator once (arch will be updated per-block if needed)
         let mut simulator = Simulator::new()?;
         if let Some(seed) = self.seed {
             simulator.random_generator = crate::simulator::RandomStateGenerator::with_seed(seed);
         }
+        // Track current arch to re-init simulator when arch changes
+        let mut current_arch = String::from("x86_64");
 
         let mut total_success = 0;
         let mut total_failure = 0;
@@ -129,6 +131,16 @@ impl SimulateCommand {
             }
 
             let extraction = &extractions[block_number - 1];
+
+            // Re-initialize simulator if architecture changed
+            if extraction.binary_architecture != current_arch {
+                current_arch = extraction.binary_architecture.clone();
+                simulator = Simulator::for_target(&current_arch)?;
+                if let Some(seed) = self.seed {
+                    simulator.random_generator =
+                        crate::simulator::RandomStateGenerator::with_seed(seed);
+                }
+            }
 
             // Check if block is analyzed
             if extraction.analysis_status != "analyzed" {

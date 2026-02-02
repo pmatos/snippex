@@ -512,7 +512,7 @@ impl ValidateCommand {
                     if single_run {
                         println!("Compiling simulation binary...");
                     }
-                    let simulator = Simulator::new()?;
+                    let simulator = Simulator::for_target(&extraction.binary_architecture)?;
                     match simulator.compile_simulation_binary(extraction, &analysis, &initial_state)
                     {
                         Ok(path) => {
