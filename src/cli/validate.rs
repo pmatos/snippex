@@ -78,7 +78,10 @@ pub struct ValidateCommand {
     #[arg(long, help = "Stop on first validation failure within a block's runs")]
     pub stop_on_failure: bool,
 
-    #[arg(long, help = "Stop after the first block that has any validation failure")]
+    #[arg(
+        long,
+        help = "Stop after the first block that has any validation failure"
+    )]
     pub fail_fast: bool,
 
     #[arg(
