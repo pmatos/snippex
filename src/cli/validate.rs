@@ -229,9 +229,27 @@ impl ComparisonResult {
         let mut memory_match = true;
 
         // Compare memory locations
+        // Stack slot 0 (pseudo-address 0xFFFFFFFF00000000) contains the flags
+        // value left on the stack by the pushfq/pop rax sequence in the epilogue.
+        // Apply the ignore_flags_mask to this slot to avoid false positives.
+        const FLAGS_STACK_SLOT: u64 = 0xFFFF_FFFF_0000_0000;
+
         for (addr, native_bytes) in &native.memory_locations {
             if let Some(fex_bytes) = fex.memory_locations.get(addr) {
-                if native_bytes != fex_bytes {
+                let (native_cmp, fex_cmp) = if *addr == FLAGS_STACK_SLOT
+                    && native_bytes.len() == 8
+                    && fex_bytes.len() == 8
+                {
+                    let native_val = u64::from_le_bytes(native_bytes[..8].try_into().unwrap());
+                    let fex_val = u64::from_le_bytes(fex_bytes[..8].try_into().unwrap());
+                    let masked_native = (native_val & !ignore_flags_mask).to_le_bytes().to_vec();
+                    let masked_fex = (fex_val & !ignore_flags_mask).to_le_bytes().to_vec();
+                    (masked_native, masked_fex)
+                } else {
+                    (native_bytes.clone(), fex_bytes.clone())
+                };
+
+                if native_cmp != fex_cmp {
                     memory_match = false;
                     memory_differences.push(MemoryDiff {
                         address: *addr,
