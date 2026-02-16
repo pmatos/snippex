@@ -144,7 +144,7 @@ jobs:
           cache-bin: false
 
       - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@v1.17.4
+        uses: cargo-bins/cargo-binstall@v1.17.5
 
       - name: Make QA script executable
         run: chmod +x scripts/qa.sh
@@ -179,7 +179,7 @@ jobs:
           cache-bin: false
 
       - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@v1.17.4
+        uses: cargo-bins/cargo-binstall@v1.17.5
 
       - name: Install cargo-tarpaulin
         run: cargo binstall --no-confirm cargo-tarpaulin
